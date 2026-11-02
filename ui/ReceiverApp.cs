@@ -301,6 +301,22 @@ internal sealed class Settings
     public int OutputRate = 44100;
     public int OutputBits = 16;
     public bool Statistics = false;
+    public string Dither = "auto"; // auto, on or off
+    public int VolumeRangeDb = 60;
+    public string RealtimeAnchor = "shairport"; // shairport or low-latency
+    public bool DriftCorrection = true;
+    public double DriftToleranceMs = 2;
+    public double ResyncThresholdMs = 50;
+    public int SessionTimeout = 120; // seconds, 0: never
+    public int ActiveTimeout = 10;   // seconds, 0: keep the output open
+    public bool RefuseInterruption = false;
+    public string OnPlayBegin = "", OnPlayEnd = "", OnActiveBegin = "", OnActiveEnd = "";
+    public int Port = 7000;
+    public int EventPort = 60003;
+    public int UdpPortBase = 0; // 0: Windows chooses
+    public int UdpPortRange = 100;
+    public bool IPv4Only = false;
+    public int DeviceIdOffset = 0;
 
     public static readonly string Directory = Path.Combine(Environment.GetFolderPath(Environment.SpecialFolder.ApplicationData), "AirPlay2Audio");
     private static string FilePath { get { return Path.Combine(Directory, "settings.ini"); } }
@@ -346,7 +362,7 @@ internal sealed class Settings
 
     private void Set(string key, string value)
     {
-        int n; bool b;
+        int n; bool b; double d;
         switch (key) {
             case "DeviceName": if (value.Length > 0) DeviceName = value; break;
             case "NetworkInterface": NetworkInterface = value; break;
@@ -362,6 +378,25 @@ internal sealed class Settings
             case "OutputRate": if (Int32.TryParse(value, out n) && OutputFormat.ValidRate(n)) OutputRate = n; break;
             case "OutputBits": if (Int32.TryParse(value, out n) && (n == 16 || n == 24 || n == 32)) OutputBits = n; break;
             case "Statistics": if (Boolean.TryParse(value, out b)) Statistics = b; break;
+            case "Dither": if (value == "auto" || value == "on" || value == "off") Dither = value; break;
+            case "VolumeRangeDb": if (Int32.TryParse(value, out n)) VolumeRangeDb = Math.Max(10, Math.Min(96, n)); break;
+            case "RealtimeAnchor": if (value == "shairport" || value == "low-latency") RealtimeAnchor = value; break;
+            case "DriftCorrection": if (Boolean.TryParse(value, out b)) DriftCorrection = b; break;
+            case "DriftToleranceMs": if (Double.TryParse(value, NumberStyles.Float, CultureInfo.InvariantCulture, out d) && d > 0 && d <= 1000) DriftToleranceMs = d; break;
+            case "ResyncThresholdMs": if (Double.TryParse(value, NumberStyles.Float, CultureInfo.InvariantCulture, out d) && d > 0 && d <= 10000) ResyncThresholdMs = d; break;
+            case "SessionTimeout": if (Int32.TryParse(value, out n) && n >= 0) SessionTimeout = n; break;
+            case "ActiveTimeout": if (Int32.TryParse(value, out n) && n >= 0) ActiveTimeout = n; break;
+            case "RefuseInterruption": if (Boolean.TryParse(value, out b)) RefuseInterruption = b; break;
+            case "OnPlayBegin": OnPlayBegin = value; break;
+            case "OnPlayEnd": OnPlayEnd = value; break;
+            case "OnActiveBegin": OnActiveBegin = value; break;
+            case "OnActiveEnd": OnActiveEnd = value; break;
+            case "Port": if (Int32.TryParse(value, out n) && n > 0 && n <= 65535) Port = n; break;
+            case "EventPort": if (Int32.TryParse(value, out n) && n > 0 && n <= 65535) EventPort = n; break;
+            case "UdpPortBase": if (Int32.TryParse(value, out n) && n >= 0 && n <= 65535) UdpPortBase = n; break;
+            case "UdpPortRange": if (Int32.TryParse(value, out n) && n >= 3 && n <= 65535) UdpPortRange = n; break;
+            case "IPv4Only": if (Boolean.TryParse(value, out b)) IPv4Only = b; break;
+            case "DeviceIdOffset": if (Int32.TryParse(value, out n) && n >= 0 && n <= 999) DeviceIdOffset = n; break;
         }
     }
 
@@ -405,9 +440,30 @@ internal sealed class Settings
                 "OutputRate=" + OutputRate.ToString(CultureInfo.InvariantCulture),
                 "OutputBits=" + OutputBits.ToString(CultureInfo.InvariantCulture),
                 "Statistics=" + Statistics,
+                "Dither=" + Dither,
+                "VolumeRangeDb=" + VolumeRangeDb.ToString(CultureInfo.InvariantCulture),
+                "RealtimeAnchor=" + RealtimeAnchor,
+                "DriftCorrection=" + DriftCorrection,
+                "DriftToleranceMs=" + DriftToleranceMs.ToString("R", CultureInfo.InvariantCulture),
+                "ResyncThresholdMs=" + ResyncThresholdMs.ToString("R", CultureInfo.InvariantCulture),
+                "SessionTimeout=" + SessionTimeout.ToString(CultureInfo.InvariantCulture),
+                "ActiveTimeout=" + ActiveTimeout.ToString(CultureInfo.InvariantCulture),
+                "RefuseInterruption=" + RefuseInterruption,
+                "OnPlayBegin=" + OneLine(OnPlayBegin),
+                "OnPlayEnd=" + OneLine(OnPlayEnd),
+                "OnActiveBegin=" + OneLine(OnActiveBegin),
+                "OnActiveEnd=" + OneLine(OnActiveEnd),
+                "Port=" + Port.ToString(CultureInfo.InvariantCulture),
+                "EventPort=" + EventPort.ToString(CultureInfo.InvariantCulture),
+                "UdpPortBase=" + UdpPortBase.ToString(CultureInfo.InvariantCulture),
+                "UdpPortRange=" + UdpPortRange.ToString(CultureInfo.InvariantCulture),
+                "IPv4Only=" + IPv4Only,
+                "DeviceIdOffset=" + DeviceIdOffset.ToString(CultureInfo.InvariantCulture),
             }, Encoding.UTF8);
         } catch (IOException) { } catch (UnauthorizedAccessException) { }
     }
+
+    private static string OneLine(string value) { return value.Replace("\r", "").Replace("\n", " ").Trim(); }
 }
 
 // Start with Windows, via the per-user Run key.
@@ -520,6 +576,27 @@ internal sealed class Engine
         if (s.OutputRate != 44100) args.Append(" -output-rate ").Append(s.OutputRate.ToString(CultureInfo.InvariantCulture));
         if (s.OutputBits != 16) args.Append(" -output-bits ").Append(s.OutputBits.ToString(CultureInfo.InvariantCulture));
         if (s.Statistics) args.Append(" -statistics");
+        if (s.Dither != "auto") args.Append(" -dither ").Append(s.Dither);
+        if (s.VolumeRangeDb != 60) args.Append(" -volume-range ").Append(s.VolumeRangeDb.ToString(CultureInfo.InvariantCulture));
+        if (s.RealtimeAnchor != "shairport") args.Append(" -realtime-anchor ").Append(s.RealtimeAnchor);
+        if (!s.DriftCorrection) args.Append(" -drift-correction=false");
+        if (s.DriftToleranceMs != 2) args.Append(" -drift-tolerance ").Append(s.DriftToleranceMs.ToString("R", CultureInfo.InvariantCulture));
+        if (s.ResyncThresholdMs != 50) args.Append(" -resync-threshold ").Append(s.ResyncThresholdMs.ToString("R", CultureInfo.InvariantCulture));
+        if (s.SessionTimeout != 120) args.Append(" -session-timeout ").Append(s.SessionTimeout.ToString(CultureInfo.InvariantCulture));
+        if (s.ActiveTimeout != 10) args.Append(" -active-timeout ").Append(s.ActiveTimeout.ToString(CultureInfo.InvariantCulture));
+        if (s.RefuseInterruption) args.Append(" -refuse-interruption");
+        if (s.OnPlayBegin.Length > 0) args.Append(" -on-play-begin ").Append(Quote(s.OnPlayBegin));
+        if (s.OnPlayEnd.Length > 0) args.Append(" -on-play-end ").Append(Quote(s.OnPlayEnd));
+        if (s.OnActiveBegin.Length > 0) args.Append(" -on-active-begin ").Append(Quote(s.OnActiveBegin));
+        if (s.OnActiveEnd.Length > 0) args.Append(" -on-active-end ").Append(Quote(s.OnActiveEnd));
+        if (s.Port != 7000) args.Append(" -port ").Append(s.Port.ToString(CultureInfo.InvariantCulture));
+        if (s.EventPort != 60003) args.Append(" -event-port ").Append(s.EventPort.ToString(CultureInfo.InvariantCulture));
+        if (s.UdpPortBase > 0) {
+            args.Append(" -udp-port-base ").Append(s.UdpPortBase.ToString(CultureInfo.InvariantCulture));
+            args.Append(" -udp-port-range ").Append(s.UdpPortRange.ToString(CultureInfo.InvariantCulture));
+        }
+        if (s.IPv4Only) args.Append(" -ipv4only");
+        if (s.DeviceIdOffset != 0) args.Append(" -device-id-offset ").Append(s.DeviceIdOffset.ToString(CultureInfo.InvariantCulture));
         args.Append(" -monitor");
 
         Process p = new Process();
@@ -1270,9 +1347,9 @@ internal sealed class MainForm : Form
         if (line.Contains("ERROR: ")) failure = FriendlyError(line.Substring(line.IndexOf("ERROR: ") + 7));
     }
 
-    private static string FriendlyError(string message)
+    private string FriendlyError(string message)
     {
-        if (message.Contains("7000") || message.Contains("60003") || message.Contains("319") || message.Contains("320") || message.Contains("bind"))
+        if (message.Contains(settings.Port.ToString(CultureInfo.InvariantCulture)) || message.Contains(settings.EventPort.ToString(CultureInfo.InvariantCulture)) || message.Contains("319") || message.Contains("320") || message.Contains("bind"))
             return "网络端口被占用。可能已有另一个 AirPlay 接收器（例如 UxPlay）在运行，请先关闭它。";
         if (message.Contains("no active network interface"))
             return "找不到可用的网络连接。请确认电脑已连上局域网，或在高级设置中选择网卡。";
@@ -1426,10 +1503,26 @@ internal sealed class AdvancedForm : Form
 {
     private readonly Settings settings;
     private readonly ComboBox network = new ComboBox();
+    private readonly CheckBox ipv4Only = new CheckBox();
     private readonly ComboBox device = new ComboBox();
     private readonly ComboBox format = new ComboBox();
+    private readonly ComboBox dither = new ComboBox();
+    private readonly NumericUpDown volumeRange = new NumericUpDown();
     private readonly NumericUpDown delay = new NumericUpDown();
     private readonly CheckBox synchronize = new CheckBox();
+    private readonly ComboBox anchor = new ComboBox();
+    private readonly CheckBox driftCorrection = new CheckBox();
+    private readonly NumericUpDown driftTolerance = new NumericUpDown();
+    private readonly NumericUpDown resyncThreshold = new NumericUpDown();
+    private readonly NumericUpDown sessionTimeout = new NumericUpDown();
+    private readonly NumericUpDown activeTimeout = new NumericUpDown();
+    private readonly CheckBox refuseInterruption = new CheckBox();
+    private readonly TextBox onPlayBegin = new TextBox(), onPlayEnd = new TextBox(), onActiveBegin = new TextBox(), onActiveEnd = new TextBox();
+    private readonly NumericUpDown port = new NumericUpDown();
+    private readonly NumericUpDown eventPort = new NumericUpDown();
+    private readonly NumericUpDown udpPortBase = new NumericUpDown();
+    private readonly NumericUpDown udpPortRange = new NumericUpDown();
+    private readonly NumericUpDown deviceIdOffset = new NumericUpDown();
     private readonly CheckBox trace = new CheckBox();
     private readonly CheckBox statistics = new CheckBox();
     public bool Changed { get; private set; }
@@ -1447,98 +1540,126 @@ internal sealed class AdvancedForm : Form
         AutoSize = true; AutoSizeMode = AutoSizeMode.GrowAndShrink;
         Padding = new Padding(0, 0, 18, 14);
 
-        TableLayoutPanel root = new TableLayoutPanel { ColumnCount = 1, AutoSize = true, Location = new Point(18, 14) };
-        root.ColumnStyles.Add(new ColumnStyle(SizeType.Absolute, 460));
+        TableLayoutPanel root = new TableLayoutPanel { ColumnCount = 2, AutoSize = true, Location = new Point(18, 14) };
+        root.ColumnStyles.Add(new ColumnStyle(SizeType.AutoSize));
+        root.ColumnStyles.Add(new ColumnStyle(SizeType.AutoSize));
         Controls.Add(root);
+        TableLayoutPanel left = Column(new Padding(0));
+        TableLayoutPanel right = Column(new Padding(18, 0, 0, 0));
+        root.Controls.Add(left, 0, 0);
+        root.Controls.Add(right, 1, 0);
 
-        root.Controls.Add(Title("网络"));
-        Card netCard = new Card { Margin = new Padding(0, 0, 0, 14) };
-        TableLayoutPanel netGrid = new TableLayoutPanel { ColumnCount = 2, AutoSize = true, Dock = DockStyle.Top, BackColor = Theme.Card };
-        netGrid.ColumnStyles.Add(new ColumnStyle(SizeType.Percent, 100));
-        netGrid.ColumnStyles.Add(new ColumnStyle(SizeType.AutoSize));
+        // ---- left: network, playback, output, troubleshooting
+
+        TableLayoutPanel g = Section(left, "网络");
         network.DropDownStyle = ComboBoxStyle.DropDownList;
         network.Dock = DockStyle.Fill;
         network.Margin = new Padding(0, 4, 8, 4);
         Button refresh = Theme.MakeButton("刷新", false);
         refresh.Margin = new Padding(0, 1, 0, 1);
         refresh.Click += delegate { LoadInterfaces(SelectedInterface()); };
-        netGrid.Controls.Add(network, 0, 0);
-        netGrid.Controls.Add(refresh, 1, 0);
-        netGrid.Controls.Add(Note("电脑有多个网卡（如虚拟机、VPN）时，选择和 iPhone 处于同一局域网的那一个。"), 0, 1);
-        netGrid.SetColumnSpan(netGrid.GetControlFromPosition(0, 1), 2);
-        netCard.Controls.Add(netGrid);
-        root.Controls.Add(netCard);
+        TableLayoutPanel netRow = new TableLayoutPanel { ColumnCount = 2, AutoSize = true, Dock = DockStyle.Fill, BackColor = Theme.Card, Margin = new Padding(0) };
+        netRow.ColumnStyles.Add(new ColumnStyle(SizeType.Percent, 100));
+        netRow.ColumnStyles.Add(new ColumnStyle(SizeType.AutoSize));
+        netRow.Controls.Add(network, 0, 0);
+        netRow.Controls.Add(refresh, 1, 0);
+        Row(g, null, netRow, null);
+        Row(g, null, Note("电脑有多个网卡（如虚拟机、VPN）时，选择和 iPhone 处于同一局域网的那一个。"), null);
+        Row(g, null, Check(ipv4Only, "只使用 IPv4", s.IPv4Only), null);
 
-        root.Controls.Add(Title("播放"));
-        Card playCard = new Card { Margin = new Padding(0, 0, 0, 14) };
-        FlowLayoutPanel play = new FlowLayoutPanel { FlowDirection = FlowDirection.TopDown, AutoSize = true, WrapContents = false, Dock = DockStyle.Top, BackColor = Theme.Card };
-        synchronize.Text = "按发送端时间同步播放（推荐）";
-        synchronize.AutoSize = true; synchronize.BackColor = Theme.Card;
-        synchronize.Checked = s.Synchronize;
-        play.Controls.Add(synchronize);
-        play.Controls.Add(Note("关闭后延迟更低，但看视频时声音可能和画面对不上，多个音箱之间也不再同步。"));
-        FlowLayoutPanel delayRow = new FlowLayoutPanel { AutoSize = true, WrapContents = false, BackColor = Theme.Card, Margin = new Padding(0, 10, 0, 0) };
-        Label delayLabel = new Label { Text = "输出延迟补偿", AutoSize = true, Margin = new Padding(0, 6, 10, 0) };
-        delay.Minimum = -500; delay.Maximum = 500; delay.Increment = 10; delay.Width = 90;
-        delay.Value = Math.Max(-500, Math.Min(500, s.DelayMs));
-        Label ms = new Label { Text = "毫秒", AutoSize = true, Margin = new Padding(6, 6, 0, 0) };
-        delayRow.Controls.Add(delayLabel); delayRow.Controls.Add(delay); delayRow.Controls.Add(ms);
-        play.Controls.Add(delayRow);
-        play.Controls.Add(Note("使用蓝牙耳机或音箱时，如果声音比画面慢，可以填一个正数（例如 150）。"));
-        playCard.Controls.Add(play);
-        root.Controls.Add(playCard);
+        g = Section(left, "播放");
+        Row(g, null, Check(synchronize, "按发送端时间同步播放（推荐）", s.Synchronize), null);
+        Row(g, null, Note("关闭后延迟更低，但看视频时声音可能和画面对不上，多个音箱之间也不再同步。"), null);
+        Number(delay, -500, 500, s.DelayMs, 0, 10);
+        Row(g, "输出延迟补偿", delay, "毫秒");
+        Row(g, null, Note("使用蓝牙耳机或音箱时，如果声音比画面慢，可以填一个正数（例如 150）。"), null);
+        anchor.DropDownStyle = ComboBoxStyle.DropDownList; anchor.Width = 220;
+        Choose(anchor, s.RealtimeAnchor, new NetworkChoice { Name = "shairport", Label = "标准（与其他音箱同步）" },
+            new NetworkChoice { Name = "low-latency", Label = "低延迟（约早 1.75 秒）" });
+        Row(g, "实时流定时", anchor, null);
+        Row(g, null, Note("iOS 上声音明显滞后时可以试试低延迟，但无法与 HomePod 等其他音箱组成多房间同步。"), null);
 
-        root.Controls.Add(Title("音频输出"));
-        Card outCard = new Card { Margin = new Padding(0, 0, 0, 14) };
-        TableLayoutPanel outGrid = new TableLayoutPanel { ColumnCount = 2, AutoSize = true, Dock = DockStyle.Top, BackColor = Theme.Card };
-        outGrid.ColumnStyles.Add(new ColumnStyle(SizeType.AutoSize));
-        outGrid.ColumnStyles.Add(new ColumnStyle(SizeType.Percent, 100));
-        device.DropDownStyle = ComboBoxStyle.DropDownList; device.Dock = DockStyle.Fill; device.Margin = new Padding(0, 4, 0, 4);
-        format.DropDownStyle = ComboBoxStyle.DropDownList; format.Dock = DockStyle.Fill; format.Margin = new Padding(0, 4, 0, 4);
-        outGrid.Controls.Add(new Label { Text = "设备", AutoSize = true, Margin = new Padding(0, 8, 10, 0) }, 0, 0);
-        outGrid.Controls.Add(device, 1, 0);
-        outGrid.Controls.Add(new Label { Text = "格式", AutoSize = true, Margin = new Padding(0, 8, 10, 0) }, 0, 1);
-        outGrid.Controls.Add(format, 1, 1);
-        Label outNote = Note("音量在接收端按 24 位以上精度处理；选 16 位时自动加抖动。提高采样率会对音频做高质量重采样，不会提升音源本身的音质。");
-        outGrid.Controls.Add(outNote, 0, 2);
-        outGrid.SetColumnSpan(outNote, 2);
-        outCard.Controls.Add(outGrid);
-        root.Controls.Add(outCard);
+        g = Section(left, "音频输出");
+        device.DropDownStyle = ComboBoxStyle.DropDownList; device.Dock = DockStyle.Fill;
+        format.DropDownStyle = ComboBoxStyle.DropDownList; format.Dock = DockStyle.Fill;
+        Row(g, "设备", device, null);
+        Row(g, "格式", format, null);
         foreach (OutputFormat f in OutputFormat.All) {
             format.Items.Add(f);
             if (f.Rate == s.OutputRate && f.Bits == s.OutputBits) format.SelectedItem = f;
         }
         if (format.SelectedIndex < 0) format.SelectedIndex = 0;
+        dither.DropDownStyle = ComboBoxStyle.DropDownList; dither.Dock = DockStyle.Fill;
+        Choose(dither, s.Dither, new NetworkChoice { Name = "auto", Label = "自动（16 位且调过音量或重采样时）" },
+            new NetworkChoice { Name = "on", Label = "始终加入" }, new NetworkChoice { Name = "off", Label = "关闭" });
+        Row(g, "抖动", dither, null);
+        Number(volumeRange, 10, 96, s.VolumeRangeDb, 0, 1);
+        Row(g, "音量范围", volumeRange, "dB（发送端最小音量时的衰减）");
+        Row(g, null, Note("音量在接收端按 24 位以上精度处理。提高采样率会对音频做高质量重采样，不会提升音源本身的音质。"), null);
 
-        root.Controls.Add(Title("故障排查"));
-        Card debugCard = new Card { Margin = new Padding(0, 0, 0, 14) };
-        FlowLayoutPanel debug = new FlowLayoutPanel { FlowDirection = FlowDirection.TopDown, AutoSize = true, WrapContents = false, Dock = DockStyle.Top, BackColor = Theme.Card };
-        trace.Text = "记录详细的协议日志";
-        trace.AutoSize = true; trace.BackColor = Theme.Card;
-        trace.Checked = s.TraceLog;
-        debug.Controls.Add(trace);
-        statistics.Text = "每 10 秒记录同步误差、漂移校正和丢包统计";
-        statistics.AutoSize = true; statistics.BackColor = Theme.Card;
-        statistics.Checked = s.Statistics;
-        debug.Controls.Add(statistics);
+        g = Section(left, "故障排查");
+        Row(g, null, Check(trace, "记录详细的协议日志", s.TraceLog), null);
+        Row(g, null, Check(statistics, "每 10 秒记录同步误差、漂移校正和丢包统计", s.Statistics), null);
         Button folder = Theme.MakeButton("打开数据文件夹", false);
-        folder.Margin = new Padding(0, 8, 0, 0);
         folder.Click += delegate {
             try { Directory.CreateDirectory(Settings.Directory); Process.Start("explorer.exe", "\"" + Settings.Directory + "\""); } catch (Exception) { }
         };
-        debug.Controls.Add(folder);
-        debugCard.Controls.Add(debug);
-        root.Controls.Add(debugCard);
+        Row(g, null, folder, null);
+        folder.Margin = new Padding(0, 8, 0, 0);
 
-        FlowLayoutPanel buttons = new FlowLayoutPanel { AutoSize = true, Dock = DockStyle.Right, FlowDirection = FlowDirection.RightToLeft, Margin = new Padding(0) };
+        // ---- right: drift correction, sessions, event commands, ports
+
+        g = Section(right, "漂移校正");
+        Row(g, null, Check(driftCorrection, "逐个增减采样，平滑校正时钟漂移（推荐）", s.DriftCorrection), null);
+        Number(driftTolerance, 0.1m, 1000, (decimal)s.DriftToleranceMs, 1, 0.5m);
+        Row(g, "校正容差", driftTolerance, "毫秒");
+        Number(resyncThreshold, 1, 10000, (decimal)s.ResyncThresholdMs, 0, 10);
+        Row(g, "跳变阈值", resyncThreshold, "毫秒");
+        Row(g, null, Note("误差超过容差时开始校正；持续超过跳变阈值（例如声卡欠载）时直接跳过或补静音。"), null);
+
+        g = Section(right, "会话");
+        Number(sessionTimeout, 0, 86400, s.SessionTimeout, 0, 10);
+        Row(g, "无响应断开", sessionTimeout, "秒（0 不限）");
+        Number(activeTimeout, 0, 86400, s.ActiveTimeout, 0, 5);
+        Row(g, "停止播放后", activeTimeout, "秒释放设备（0 一直占用）");
+        Row(g, null, Check(refuseInterruption, "有设备连接时拒绝其他设备", s.RefuseInterruption), null);
+        Row(g, null, Note("不勾选时，后开始播放的设备会接管输出，之前的设备自动暂停。"), null);
+
+        g = Section(right, "事件命令");
+        Command(g, "开始播放", onPlayBegin, s.OnPlayBegin);
+        Command(g, "停止播放", onPlayEnd, s.OnPlayEnd);
+        Command(g, "打开输出设备", onActiveBegin, s.OnActiveBegin);
+        Command(g, "释放输出设备", onActiveEnd, s.OnActiveEnd);
+        Row(g, null, Note("通过 cmd.exe 运行，环境变量 AIRPLAY_EVENT 为事件名。留空不运行。"), null);
+
+        g = Section(right, "端口与多实例");
+        Number(port, 1, 65535, s.Port, 0, 1);
+        Row(g, "控制端口", port, "TCP");
+        Number(eventPort, 1, 65535, s.EventPort, 0, 1);
+        Row(g, "事件端口", eventPort, "TCP");
+        Number(udpPortBase, 0, 65535, s.UdpPortBase, 0, 1);
+        Row(g, "音频端口起点", udpPortBase, "0 由系统分配");
+        Number(udpPortRange, 3, 65535, s.UdpPortRange, 0, 1);
+        Row(g, "音频端口数量", udpPortRange, "个");
+        Number(deviceIdOffset, 0, 999, s.DeviceIdOffset, 0, 1);
+        Row(g, "设备 ID 偏移", deviceIdOffset, null);
+        Row(g, null, Note("便于编写防火墙规则，或与其他 AirPlay 接收器同时运行（各自使用不同的端口和设备 ID 偏移）。"), null);
+
+        synchronize.CheckedChanged += delegate { UpdateEnabled(); };
+        driftCorrection.CheckedChanged += delegate { UpdateEnabled(); };
+        udpPortBase.ValueChanged += delegate { UpdateEnabled(); };
+        UpdateEnabled();
+
+        FlowLayoutPanel buttons = new FlowLayoutPanel { AutoSize = true, Anchor = AnchorStyles.Right, FlowDirection = FlowDirection.RightToLeft, Margin = new Padding(0) };
         Button cancel = Theme.MakeButton("取消", false);
         cancel.DialogResult = DialogResult.Cancel;
         Button ok = Theme.MakeButton("确定", true);
-        ok.Click += delegate { Apply(); DialogResult = DialogResult.OK; };
+        ok.Click += delegate { if (Apply()) DialogResult = DialogResult.OK; };
         cancel.Margin = new Padding(8, 0, 0, 0); ok.Margin = new Padding(8, 0, 0, 0);
         cancel.MinimumSize = ok.MinimumSize = new Size(88, 34);
         buttons.Controls.Add(cancel); buttons.Controls.Add(ok);
-        root.Controls.Add(buttons);
+        root.Controls.Add(buttons, 0, 1);
+        root.SetColumnSpan(buttons, 2);
         AcceptButton = ok; CancelButton = cancel;
 
         AutoScaleDimensions = new SizeF(96F, 96F);
@@ -1546,6 +1667,108 @@ internal sealed class AdvancedForm : Form
         ResumeLayout(true);
         LoadInterfaces(s.NetworkInterface);
         LoadDevices(s.OutputDevice);
+    }
+
+    // On a small or highly scaled screen, fit the dialog and scroll instead.
+    protected override void OnLoad(EventArgs e)
+    {
+        base.OnLoad(e);
+        Rectangle area = Screen.FromControl(Owner != null ? (Control)Owner : this).WorkingArea;
+        if (Height <= area.Height) return;
+        Size size = Size;
+        AutoSize = false;
+        AutoScroll = true;
+        AutoScrollMargin = new Size(0, 14);
+        Size = new Size(Math.Min(area.Width, size.Width + SystemInformation.VerticalScrollBarWidth), area.Height);
+        Location = new Point(Math.Max(area.Left, Math.Min(Left, area.Right - Width)), area.Top);
+    }
+
+    private void UpdateEnabled()
+    {
+        bool sync = synchronize.Checked;
+        anchor.Enabled = sync;
+        driftCorrection.Enabled = sync;
+        driftTolerance.Enabled = sync && driftCorrection.Checked;
+        resyncThreshold.Enabled = sync;
+        udpPortRange.Enabled = udpPortBase.Value > 0;
+    }
+
+    private static TableLayoutPanel Column(Padding margin)
+    {
+        TableLayoutPanel column = new TableLayoutPanel { ColumnCount = 1, AutoSize = true, Margin = margin, Padding = new Padding(0) };
+        column.ColumnStyles.Add(new ColumnStyle(SizeType.Absolute, 460));
+        return column;
+    }
+
+    // A titled card holding a two-column grid: caption, field.
+    private static TableLayoutPanel Section(TableLayoutPanel column, string title)
+    {
+        column.Controls.Add(Title(title));
+        Card card = new Card { Margin = new Padding(0, 0, 0, 14) };
+        TableLayoutPanel grid = new TableLayoutPanel { ColumnCount = 2, AutoSize = true, Dock = DockStyle.Top, BackColor = Theme.Card };
+        grid.ColumnStyles.Add(new ColumnStyle(SizeType.AutoSize));
+        grid.ColumnStyles.Add(new ColumnStyle(SizeType.Percent, 100));
+        card.Controls.Add(grid);
+        column.Controls.Add(card);
+        return grid;
+    }
+
+    // Adds a row; without a caption the field spans both columns, with a
+    // unit the field keeps its own width and the unit follows it.
+    private static void Row(TableLayoutPanel grid, string caption, Control field, string unit)
+    {
+        int row = grid.RowCount;
+        grid.RowCount = row + 1;
+        grid.RowStyles.Add(new RowStyle(SizeType.AutoSize));
+        if (caption == null) {
+            grid.Controls.Add(field, 0, row);
+            grid.SetColumnSpan(field, 2);
+            return;
+        }
+        grid.Controls.Add(new Label { Text = caption, AutoSize = true, Margin = new Padding(0, 8, 10, 0) }, 0, row);
+        field.Margin = new Padding(0, 4, 0, 4);
+        if (unit == null) { grid.Controls.Add(field, 1, row); return; }
+        FlowLayoutPanel cell = new FlowLayoutPanel { AutoSize = true, WrapContents = false, BackColor = Theme.Card, Margin = new Padding(0) };
+        cell.Controls.Add(field);
+        cell.Controls.Add(new Label { Text = unit, AutoSize = true, ForeColor = Theme.SubText, Margin = new Padding(6, 8, 0, 0) });
+        grid.Controls.Add(cell, 1, row);
+    }
+
+    private static CheckBox Check(CheckBox box, string text, bool value)
+    {
+        box.Text = text;
+        box.AutoSize = true; box.BackColor = Theme.Card;
+        box.Margin = new Padding(0, 4, 0, 4);
+        box.Checked = value;
+        return box;
+    }
+
+    private static void Number(NumericUpDown n, decimal min, decimal max, decimal value, int decimals, decimal increment)
+    {
+        n.Minimum = min; n.Maximum = max; n.DecimalPlaces = decimals; n.Increment = increment; n.Width = 90;
+        n.Value = Math.Max(min, Math.Min(max, value));
+    }
+
+    private static void Choose(ComboBox box, string selected, params NetworkChoice[] choices)
+    {
+        foreach (NetworkChoice c in choices) {
+            box.Items.Add(c);
+            if (c.Name == selected) box.SelectedItem = c;
+        }
+        if (box.SelectedIndex < 0) box.SelectedIndex = 0;
+    }
+
+    private static void Command(TableLayoutPanel grid, string caption, TextBox box, string value)
+    {
+        box.Text = value;
+        box.Dock = DockStyle.Fill;
+        Row(grid, caption, box, null);
+    }
+
+    private static string Chosen(ComboBox box, string fallback)
+    {
+        NetworkChoice choice = box.SelectedItem as NetworkChoice;
+        return choice == null ? fallback : choice.Name;
     }
 
     // The engine lists the devices it can open, with the same names it
@@ -1626,25 +1849,91 @@ internal sealed class AdvancedForm : Form
         network.SelectedIndex = selected;
     }
 
-    private void Apply()
+    // Copies the dialog into the settings; false (nothing changed) if a value is invalid.
+    private bool Apply()
     {
-        string iface = SelectedInterface();
-        int delayMs = (int)delay.Value;
-        NetworkChoice deviceChoice = device.SelectedItem as NetworkChoice;
-        string outputDevice = deviceChoice == null ? settings.OutputDevice : deviceChoice.Name;
+        string error = null;
+        if (port.Value == eventPort.Value) error = "控制端口和事件端口不能相同。";
+        else if (udpPortBase.Value > 0 && udpPortBase.Value + udpPortRange.Value - 1 > 65535) error = "音频端口范围超出了 65535。";
+        else if (driftTolerance.Value >= resyncThreshold.Value) error = "漂移校正容差必须小于跳变阈值。";
+        if (error != null) {
+            MessageBox.Show(this, error, "高级设置", MessageBoxButtons.OK, MessageBoxIcon.Warning);
+            return false;
+        }
+
+        Settings n = new Settings();
+        n.NetworkInterface = SelectedInterface();
+        n.IPv4Only = ipv4Only.Checked;
+        n.DelayMs = (int)delay.Value;
+        n.Synchronize = synchronize.Checked;
+        n.RealtimeAnchor = Chosen(anchor, settings.RealtimeAnchor);
+        n.OutputDevice = Chosen(device, settings.OutputDevice);
         OutputFormat outputFormat = format.SelectedItem as OutputFormat ?? OutputFormat.All[0];
-        Changed = iface != settings.NetworkInterface || delayMs != settings.DelayMs
-            || synchronize.Checked != settings.Synchronize || trace.Checked != settings.TraceLog
-            || outputDevice != settings.OutputDevice || outputFormat.Rate != settings.OutputRate
-            || outputFormat.Bits != settings.OutputBits || statistics.Checked != settings.Statistics;
-        settings.NetworkInterface = iface;
-        settings.DelayMs = delayMs;
-        settings.Synchronize = synchronize.Checked;
-        settings.TraceLog = trace.Checked;
-        settings.OutputDevice = outputDevice;
-        settings.OutputRate = outputFormat.Rate;
-        settings.OutputBits = outputFormat.Bits;
-        settings.Statistics = statistics.Checked;
+        n.OutputRate = outputFormat.Rate;
+        n.OutputBits = outputFormat.Bits;
+        n.Dither = Chosen(dither, settings.Dither);
+        n.VolumeRangeDb = (int)volumeRange.Value;
+        n.TraceLog = trace.Checked;
+        n.Statistics = statistics.Checked;
+        n.DriftCorrection = driftCorrection.Checked;
+        n.DriftToleranceMs = (double)driftTolerance.Value;
+        n.ResyncThresholdMs = (double)resyncThreshold.Value;
+        n.SessionTimeout = (int)sessionTimeout.Value;
+        n.ActiveTimeout = (int)activeTimeout.Value;
+        n.RefuseInterruption = refuseInterruption.Checked;
+        n.OnPlayBegin = onPlayBegin.Text.Trim();
+        n.OnPlayEnd = onPlayEnd.Text.Trim();
+        n.OnActiveBegin = onActiveBegin.Text.Trim();
+        n.OnActiveEnd = onActiveEnd.Text.Trim();
+        n.Port = (int)port.Value;
+        n.EventPort = (int)eventPort.Value;
+        n.UdpPortBase = (int)udpPortBase.Value;
+        n.UdpPortRange = (int)udpPortRange.Value;
+        n.DeviceIdOffset = (int)deviceIdOffset.Value;
+
+        Changed = n.NetworkInterface != settings.NetworkInterface || n.IPv4Only != settings.IPv4Only
+            || n.DelayMs != settings.DelayMs || n.Synchronize != settings.Synchronize || n.RealtimeAnchor != settings.RealtimeAnchor
+            || n.OutputDevice != settings.OutputDevice || n.OutputRate != settings.OutputRate || n.OutputBits != settings.OutputBits
+            || n.Dither != settings.Dither || n.VolumeRangeDb != settings.VolumeRangeDb
+            || n.TraceLog != settings.TraceLog || n.Statistics != settings.Statistics
+            || n.DriftCorrection != settings.DriftCorrection || n.DriftToleranceMs != settings.DriftToleranceMs
+            || n.ResyncThresholdMs != settings.ResyncThresholdMs
+            || n.SessionTimeout != settings.SessionTimeout || n.ActiveTimeout != settings.ActiveTimeout
+            || n.RefuseInterruption != settings.RefuseInterruption
+            || n.OnPlayBegin != settings.OnPlayBegin || n.OnPlayEnd != settings.OnPlayEnd
+            || n.OnActiveBegin != settings.OnActiveBegin || n.OnActiveEnd != settings.OnActiveEnd
+            || n.Port != settings.Port || n.EventPort != settings.EventPort
+            || n.UdpPortBase != settings.UdpPortBase || n.UdpPortRange != settings.UdpPortRange
+            || n.DeviceIdOffset != settings.DeviceIdOffset;
+
+        settings.NetworkInterface = n.NetworkInterface;
+        settings.IPv4Only = n.IPv4Only;
+        settings.DelayMs = n.DelayMs;
+        settings.Synchronize = n.Synchronize;
+        settings.RealtimeAnchor = n.RealtimeAnchor;
+        settings.OutputDevice = n.OutputDevice;
+        settings.OutputRate = n.OutputRate;
+        settings.OutputBits = n.OutputBits;
+        settings.Dither = n.Dither;
+        settings.VolumeRangeDb = n.VolumeRangeDb;
+        settings.TraceLog = n.TraceLog;
+        settings.Statistics = n.Statistics;
+        settings.DriftCorrection = n.DriftCorrection;
+        settings.DriftToleranceMs = n.DriftToleranceMs;
+        settings.ResyncThresholdMs = n.ResyncThresholdMs;
+        settings.SessionTimeout = n.SessionTimeout;
+        settings.ActiveTimeout = n.ActiveTimeout;
+        settings.RefuseInterruption = n.RefuseInterruption;
+        settings.OnPlayBegin = n.OnPlayBegin;
+        settings.OnPlayEnd = n.OnPlayEnd;
+        settings.OnActiveBegin = n.OnActiveBegin;
+        settings.OnActiveEnd = n.OnActiveEnd;
+        settings.Port = n.Port;
+        settings.EventPort = n.EventPort;
+        settings.UdpPortBase = n.UdpPortBase;
+        settings.UdpPortRange = n.UdpPortRange;
+        settings.DeviceIdOffset = n.DeviceIdOffset;
+        return true;
     }
 }
 
