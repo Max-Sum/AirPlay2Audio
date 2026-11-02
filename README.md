@@ -7,10 +7,12 @@ An AirPlay 2 and AirPlay 1 audio receiver for Windows. An iPhone, iPad, Mac or A
 ## Usage
 
 1. Run `AirPlay2Audio.exe`.
-2. Set the device name and network interface, choose whether to sync to timestamps, and click "启动接收" (Start). The Apple device and the PC must be on the same local network and able to reach each other.
+2. Set the device name and network interface, choose whether to sync to timestamps, and click "Start receiving". The Apple device and the PC must be on the same local network and able to reach each other.
 3. Pick the receiver in the Apple device's audio output list.
 
-Audio plays on the Windows default output device. To choose a device or output format, open 高级设置 → 音频输出 (Advanced → Audio output).
+Audio plays on the Windows default output device. To choose a device or output format, open Advanced settings → Audio output.
+
+The interface is available in English and Simplified Chinese. It follows the Windows display language; to change it, use General → Language and restart the program.
 
 Settings and the pairing identity live in `%APPDATA%\AirPlay2Audio`. Deleting that folder resets the receiver's identity, and paired devices have to pair again.
 
