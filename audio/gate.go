@@ -74,32 +74,6 @@ func (w *standbyWatch) observe(s *Server, frame *PCMFrame) {
 	}
 }
 
-// silenceWatch reports, for the stream that owns the output, when its
-// sender sends nothing but digital silence for a while and when sound
-// comes back. It tells "the sender sends silence" apart from "the receiver
-// drops the audio" when a sender appears to play but nothing is heard.
-const silenceReportAfter = 3 * time.Second
-
-type silenceWatch struct {
-	silent   int64 // consecutive silent samples
-	reported bool
-}
-
-func (w *silenceWatch) observe(frame *PCMFrame) {
-	if !frame.silent() {
-		if w.reported {
-			log.Printf("AUDIO realtime sender is sending sound again after %d ms of silence", w.silent*1000/sampleRate)
-		}
-		*w = silenceWatch{}
-		return
-	}
-	w.silent += int64(len(frame.pcmData) / 4)
-	if !w.reported && w.silent >= int64(silenceReportAfter)*sampleRate/int64(time.Second) {
-		w.reported = true
-		log.Printf("AUDIO realtime sender is sending only silence (%s so far)", silenceReportAfter)
-	}
-}
-
 // silent reports digital silence (allowing for dither).
 func (f *PCMFrame) silent() bool {
 	for i := 0; i+1 < len(f.pcmData); i += 2 {
