@@ -4,8 +4,8 @@ import (
 	"encoding"
 	"fmt"
 	"github.com/albanseurat/go-ptp"
-	"goplay2/globals"
-	"goplay2/netutil"
+	"github.com/Max-Sum/AirPlay2Audio/globals"
+	"github.com/Max-Sum/AirPlay2Audio/netutil"
 	"net"
 	"time"
 )

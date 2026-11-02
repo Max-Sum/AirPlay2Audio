@@ -3,7 +3,7 @@ package homekit
 import (
 	"encoding/hex"
 	"fmt"
-	"goplay2/globals"
+	"github.com/Max-Sum/AirPlay2Audio/globals"
 	"reflect"
 	"strings"
 	"sync"

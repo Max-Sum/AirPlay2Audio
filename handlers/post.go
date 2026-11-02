@@ -1,6 +1,6 @@
 package handlers
 
-import "goplay2/rtsp"
+import "github.com/Max-Sum/AirPlay2Audio/rtsp"
 
 func (r *Rstp) OnPostWeb(conn *rtsp.Conn, req *rtsp.Request) (*rtsp.Response, error) {
 

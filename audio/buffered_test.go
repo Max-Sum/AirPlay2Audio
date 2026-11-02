@@ -5,7 +5,7 @@ import (
 	"sync/atomic"
 	"testing"
 
-	"goplay2/codec"
+	"github.com/Max-Sum/AirPlay2Audio/codec"
 )
 
 func TestRealtimeAnchorModes(t *testing.T) {

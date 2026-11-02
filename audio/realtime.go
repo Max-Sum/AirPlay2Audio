@@ -10,7 +10,7 @@ import (
 	"time"
 
 	"github.com/brutella/hc/crypto/chacha20poly1305"
-	"goplay2/globals"
+	"github.com/Max-Sum/AirPlay2Audio/globals"
 
 	alac "github.com/mycophonic/saprobe-alac"
 	"github.com/pion/rtp"

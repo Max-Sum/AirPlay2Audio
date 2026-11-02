@@ -1,7 +1,7 @@
 package audio
 
 import (
-	"goplay2/ptp"
+	"github.com/Max-Sum/AirPlay2Audio/ptp"
 	"time"
 )
 

@@ -9,7 +9,7 @@ import (
 	"strings"
 	"testing"
 
-	"goplay2/rtsp"
+	"github.com/Max-Sum/AirPlay2Audio/rtsp"
 )
 
 func captureMedia(t *testing.T) *bytes.Buffer {

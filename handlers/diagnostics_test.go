@@ -8,8 +8,8 @@ import (
 	"strings"
 	"testing"
 
-	"goplay2/globals"
-	"goplay2/rtsp"
+	"github.com/Max-Sum/AirPlay2Audio/globals"
+	"github.com/Max-Sum/AirPlay2Audio/rtsp"
 	"howett.net/plist"
 )
 

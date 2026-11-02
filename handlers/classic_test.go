@@ -11,9 +11,9 @@ import (
 	"testing"
 	"time"
 
-	"goplay2/audio"
-	"goplay2/ptp"
-	"goplay2/rtsp"
+	"github.com/Max-Sum/AirPlay2Audio/audio"
+	"github.com/Max-Sum/AirPlay2Audio/ptp"
+	"github.com/Max-Sum/AirPlay2Audio/rtsp"
 )
 
 func request(method, path string, header rtsp.Header, body string) *rtsp.Request {

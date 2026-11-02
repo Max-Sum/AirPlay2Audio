@@ -2,8 +2,8 @@ package audio
 
 import (
 	"encoding/binary"
-	"goplay2/globals"
-	"goplay2/ptp"
+	"github.com/Max-Sum/AirPlay2Audio/globals"
+	"github.com/Max-Sum/AirPlay2Audio/ptp"
 	"net"
 	"strconv"
 	"testing"

@@ -9,7 +9,7 @@ import (
 	"log"
 	"strings"
 
-	"goplay2/rtsp"
+	"github.com/Max-Sum/AirPlay2Audio/rtsp"
 )
 
 // Password protection. When the receiver advertises pw=true, iOS sends

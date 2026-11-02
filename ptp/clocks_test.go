@@ -8,7 +8,7 @@ import (
 	"time"
 
 	ptp "github.com/albanseurat/go-ptp"
-	"goplay2/globals"
+	"github.com/Max-Sum/AirPlay2Audio/globals"
 )
 
 // fakeMaster stands for one sender's PTP clock: its time is the receiver's
