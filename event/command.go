@@ -127,6 +127,20 @@ func SendMediaRemoteCommandTo(host string, command uint64) error {
 	return s.sendCommand(command)
 }
 
+// SendUpdateInfoTo sends updateInfo to the sender at host, if it has an
+// event channel open. It is used when that sender takes over the output:
+// the updateInfo it got when its channel connected described another
+// sender's session.
+func SendUpdateInfoTo(host string) error {
+	currentMu.Lock()
+	s := byHost[host]
+	currentMu.Unlock()
+	if s == nil {
+		return ErrNoSession
+	}
+	return s.sendUpdateInfo()
+}
+
 // InfoProvider returns the receiver's /info dictionary, sent to each sender
 // as updateInfo when its event channel connects.
 var InfoProvider func() interface{}
