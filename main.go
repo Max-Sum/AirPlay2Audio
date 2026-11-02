@@ -14,7 +14,7 @@ import (
 	"syscall"
 	"time"
 
-	"github.com/grandcat/zeroconf"
+	"github.com/Max-Sum/AirPlay2Audio/internal/zeroconf"
 	"github.com/Max-Sum/AirPlay2Audio/audio"
 	"github.com/Max-Sum/AirPlay2Audio/codec"
 	"github.com/Max-Sum/AirPlay2Audio/config"
