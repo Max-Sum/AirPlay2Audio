@@ -320,8 +320,6 @@ internal sealed class Settings
     public int DelayMs = 0;
     public bool Synchronize = true;
     public int LocalVolume = 100;
-    public bool AutoStartReceiver = true;
-    public bool CloseToTray = true;
     public bool TraceLog = false;
     public bool TrayTipShown = false;
     public string Password = ""; // empty: anyone on the network may play
@@ -331,13 +329,12 @@ internal sealed class Settings
     public bool Statistics = false;
     public string Language = L.Auto;
     public string Dither = "auto"; // auto, on or off
-    public int VolumeRangeDb = 60;
     public string RealtimeAnchor = "shairport"; // shairport or low-latency
     public bool DriftCorrection = true;
     public double DriftToleranceMs = 2;
     public double ResyncThresholdMs = 50;
     public int SessionTimeout = 120; // seconds, 0: never
-    public int ActiveTimeout = 10;   // seconds, 0: keep the output open
+    public int ActiveTimeout = 0;    // seconds, 0: keep the output open
     public bool RefuseInterruption = false;
     public string OnPlayBegin = "", OnPlayEnd = "", OnActiveBegin = "", OnActiveEnd = "";
     public int Port = 7000;
@@ -398,8 +395,6 @@ internal sealed class Settings
             case "DelayMs": if (Int32.TryParse(value, out n)) DelayMs = Math.Max(-500, Math.Min(500, n)); break;
             case "Synchronize": if (Boolean.TryParse(value, out b)) Synchronize = b; break;
             case "LocalVolume": if (Int32.TryParse(value, out n)) LocalVolume = Math.Max(0, Math.Min(100, n)); break;
-            case "AutoStartReceiver": if (Boolean.TryParse(value, out b)) AutoStartReceiver = b; break;
-            case "CloseToTray": if (Boolean.TryParse(value, out b)) CloseToTray = b; break;
             case "TraceLog": if (Boolean.TryParse(value, out b)) TraceLog = b; break;
             case "TrayTipShown": if (Boolean.TryParse(value, out b)) TrayTipShown = b; break;
             case "Password": Password = Unprotect(value); break;
@@ -409,7 +404,6 @@ internal sealed class Settings
             case "Statistics": if (Boolean.TryParse(value, out b)) Statistics = b; break;
             case "Language": if (value == L.Chinese || value == L.English) Language = value; break;
             case "Dither": if (value == "auto" || value == "on" || value == "off") Dither = value; break;
-            case "VolumeRangeDb": if (Int32.TryParse(value, out n)) VolumeRangeDb = Math.Max(10, Math.Min(96, n)); break;
             case "RealtimeAnchor": if (value == "shairport" || value == "low-latency") RealtimeAnchor = value; break;
             case "DriftCorrection": if (Boolean.TryParse(value, out b)) DriftCorrection = b; break;
             case "DriftToleranceMs": if (Double.TryParse(value, NumberStyles.Float, CultureInfo.InvariantCulture, out d) && d > 0 && d <= 1000) DriftToleranceMs = d; break;
@@ -461,8 +455,6 @@ internal sealed class Settings
                 "DelayMs=" + DelayMs.ToString(CultureInfo.InvariantCulture),
                 "Synchronize=" + Synchronize,
                 "LocalVolume=" + LocalVolume.ToString(CultureInfo.InvariantCulture),
-                "AutoStartReceiver=" + AutoStartReceiver,
-                "CloseToTray=" + CloseToTray,
                 "TraceLog=" + TraceLog,
                 "TrayTipShown=" + TrayTipShown,
                 "Password=" + Protect(Password),
@@ -472,7 +464,6 @@ internal sealed class Settings
                 "Statistics=" + Statistics,
                 "Language=" + Language,
                 "Dither=" + Dither,
-                "VolumeRangeDb=" + VolumeRangeDb.ToString(CultureInfo.InvariantCulture),
                 "RealtimeAnchor=" + RealtimeAnchor,
                 "DriftCorrection=" + DriftCorrection,
                 "DriftToleranceMs=" + DriftToleranceMs.ToString("R", CultureInfo.InvariantCulture),
@@ -608,7 +599,6 @@ internal sealed class Engine
         if (s.OutputBits != 16) args.Append(" -output-bits ").Append(s.OutputBits.ToString(CultureInfo.InvariantCulture));
         if (s.Statistics) args.Append(" -statistics");
         if (s.Dither != "auto") args.Append(" -dither ").Append(s.Dither);
-        if (s.VolumeRangeDb != 60) args.Append(" -volume-range ").Append(s.VolumeRangeDb.ToString(CultureInfo.InvariantCulture));
         if (s.RealtimeAnchor != "shairport") args.Append(" -realtime-anchor ").Append(s.RealtimeAnchor);
         if (!s.DriftCorrection) args.Append(" -drift-correction=false");
         if (s.DriftToleranceMs != 2) args.Append(" -drift-tolerance ").Append(s.DriftToleranceMs.ToString("R", CultureInfo.InvariantCulture));
@@ -943,7 +933,7 @@ internal sealed class MainForm : Form
 
     private readonly PictureBox logo = new PictureBox();
     private readonly Label statusLabel = new Label();
-    private readonly Label detailLabel = new Label();
+    private readonly Label errorLabel = new Label();
     private readonly Button toggleButton;
     private readonly TextBox nameBox = new TextBox();
     private readonly TextBox passwordBox = new TextBox();
@@ -952,8 +942,6 @@ internal sealed class MainForm : Form
     private readonly Label volumeValue = new Label();
     private readonly Label senderVolume = new Label();
     private readonly CheckBox autoStartBox = new CheckBox();
-    private readonly CheckBox autoReceiveBox = new CheckBox();
-    private readonly CheckBox closeToTrayBox = new CheckBox();
     private readonly NotifyIcon tray = new NotifyIcon();
     private readonly ToolStripMenuItem trayStatus = new ToolStripMenuItem();
     private readonly ToolStripMenuItem trayToggle = new ToolStripMenuItem();
@@ -1010,11 +998,13 @@ internal sealed class MainForm : Form
         header.Controls.Add(statusLabel, 1, 1);
         root.Controls.Add(header);
 
-        detailLabel.AutoSize = true;
-        detailLabel.MaximumSize = new Size(440, 0);
-        detailLabel.ForeColor = Theme.SubText;
-        detailLabel.Margin = new Padding(0, 0, 0, 12);
-        root.Controls.Add(detailLabel);
+        // Shown only when something went wrong.
+        errorLabel.AutoSize = true;
+        errorLabel.MaximumSize = new Size(440, 0);
+        errorLabel.ForeColor = Theme.Red;
+        errorLabel.Margin = new Padding(0, 0, 0, 12);
+        errorLabel.Visible = false;
+        root.Controls.Add(errorLabel);
 
         toggleButton = Theme.MakeButton(L.T("开始接收", "Start receiving"), true);
         toggleButton.AutoSize = false;
@@ -1094,21 +1084,13 @@ internal sealed class MainForm : Form
         root.Controls.Add(SectionTitle(L.T("常规", "General")));
         Card generalCard = new Card { Margin = new Padding(0, 0, 0, 14) };
         FlowLayoutPanel options = new FlowLayoutPanel { FlowDirection = FlowDirection.TopDown, AutoSize = true, WrapContents = false, Dock = DockStyle.Top, BackColor = Theme.Card };
-        ConfigureCheck(autoStartBox, L.T("开机时自动启动（在后台运行）", "Start with Windows (in the background)"));
+        ConfigureCheck(autoStartBox, L.T("开机时自启动", "Start with Windows"));
         autoStartBox.Checked = AutoStart.IsEnabled();
         autoStartBox.CheckedChanged += delegate {
             try { AutoStart.Set(autoStartBox.Checked); }
             catch (Exception ex) { MessageBox.Show(this, L.T("无法修改开机启动设置：", "Could not change the startup setting: ") + ex.Message, Text, MessageBoxButtons.OK, MessageBoxIcon.Warning); }
         };
-        ConfigureCheck(autoReceiveBox, L.T("打开程序后自动开始接收", "Start receiving when the program opens"));
-        autoReceiveBox.Checked = settings.AutoStartReceiver;
-        autoReceiveBox.CheckedChanged += delegate { settings.AutoStartReceiver = autoReceiveBox.Checked; settings.Save(); };
-        ConfigureCheck(closeToTrayBox, L.T("关闭窗口时保留在通知区域", "Keep running in the notification area when closed"));
-        closeToTrayBox.Checked = settings.CloseToTray;
-        closeToTrayBox.CheckedChanged += delegate { settings.CloseToTray = closeToTrayBox.Checked; settings.Save(); };
         options.Controls.Add(autoStartBox);
-        options.Controls.Add(autoReceiveBox);
-        options.Controls.Add(closeToTrayBox);
         options.Controls.Add(LanguageRow());
         generalCard.Controls.Add(options);
         root.Controls.Add(generalCard);
@@ -1138,6 +1120,7 @@ internal sealed class MainForm : Form
         restartTimer.Tick += delegate { restartTimer.Stop(); if (!engine.Running && !exiting) StartReceiver(); };
         LogStore.Open();
         AutoStart.Refresh();
+        OutputDevices.Refresh(null);
         // Reading Handle creates the window even when starting in the tray;
         // the media controls are bound to it.
         media = MediaSession.Create(Handle, delegate(string command) { Post(delegate { engine.SendMedia(command); }); });
@@ -1240,7 +1223,7 @@ internal sealed class MainForm : Form
     {
         base.OnShown(e);
         shownOnce = true;
-        if (settings.AutoStartReceiver && !engine.Running) StartReceiver();
+        if (!engine.Running) StartReceiver();
     }
 
     public void ShowFromTray()
@@ -1253,7 +1236,7 @@ internal sealed class MainForm : Form
 
     protected override void OnFormClosing(FormClosingEventArgs e)
     {
-        if (!exiting && e.CloseReason == CloseReason.UserClosing && settings.CloseToTray) {
+        if (!exiting && e.CloseReason == CloseReason.UserClosing) {
             e.Cancel = true;
             ApplyName();
             ApplyPassword();
@@ -1357,14 +1340,8 @@ internal sealed class MainForm : Form
     private void OnStats(string message)
     {
         monitor.Update(message);
-        if (state == ReceiverState.Playing) detailLabel.Text = PlayingDetail();
     }
 
-    private string PlayingDetail()
-    {
-        string summary = monitor.Summary();
-        return summary.Length > 0 ? summary : L.T("音频通过 Windows 默认播放设备输出。", "Audio plays through the Windows default playback device.");
-    }
     private static readonly Regex SenderPattern = new Regex("SESSION (?:started|active) sender=\"(.*)\"");
 
     private void OnEngineLine(string line)
@@ -1379,7 +1356,7 @@ internal sealed class MainForm : Form
             return;
         }
         if (line.Contains("AUTH wrong password") && state == ReceiverState.Waiting) {
-            detailLabel.Text = L.T("有设备输入了错误的访问密码，未能连接。", "A device entered the wrong password and could not connect.");
+            ShowError(L.T("有设备输入了错误的访问密码，未能连接。", "A device entered the wrong password and could not connect."));
             return;
         }
         if (line.Contains("SESSION ended")) { senderName = ""; senderVolume.Text = "—"; SetState(ReceiverState.Waiting); return; }
@@ -1443,39 +1420,31 @@ internal sealed class MainForm : Form
     {
         state = next;
         if (media != null) media.SetActive(next == ReceiverState.Connected || next == ReceiverState.Playing, senderName);
-        string name = settings.DeviceName;
-        string status, detail;
+        string status;
         Color color;
         switch (next) {
             case ReceiverState.Starting:
                 status = L.T("● 正在启动", "● Starting"); color = Theme.Orange;
-                detail = failure.Length > 0 ? failure : L.T("正在准备网络和音频设备…", "Preparing the network and audio device…");
                 break;
             case ReceiverState.Waiting:
                 status = L.T("● 等待连接", "● Waiting for a connection"); color = Theme.Green;
-                detail = L.T("在 iPhone、iPad 或 Mac 的音频输出（AirPlay）列表中选择「" + name + "」。", "Choose \u201c" + name + "\u201d in the audio output (AirPlay) list on your iPhone, iPad or Mac.")
-                    + (settings.Password.Length > 0 ? L.T("连接时需要输入访问密码。", " The password is required to connect.") : "");
                 break;
             case ReceiverState.Connected:
                 status = L.T("● 已连接", "● Connected") + (senderName.Length > 0 ? L.T("：", ": ") + senderName : ""); color = Theme.Green;
-                detail = L.T("等待播放音频。", "Waiting for audio.");
                 break;
             case ReceiverState.Playing:
                 status = L.T("● 正在播放", "● Playing") + (senderName.Length > 0 ? L.T("：", ": ") + senderName : ""); color = Theme.Accent;
-                detail = PlayingDetail();
                 break;
             case ReceiverState.Failed:
                 status = L.T("● 无法启动", "● Could not start"); color = Theme.Red;
-                detail = failure;
                 break;
             default:
                 status = L.T("● 已停止", "● Stopped"); color = Theme.Grey;
-                detail = L.T("点击「开始接收」后，这台电脑会出现在 Apple 设备的 AirPlay 列表中。", "Click \u201cStart receiving\u201d to make this PC appear in the AirPlay list on Apple devices.");
                 break;
         }
         statusLabel.Text = status;
         statusLabel.ForeColor = color;
-        detailLabel.Text = detail;
+        ShowError(next == ReceiverState.Failed || next == ReceiverState.Starting ? failure : "");
         bool running = engine.Running;
         toggleButton.Text = running ? L.T("停止接收", "Stop receiving") : L.T("开始接收", "Start receiving");
         toggleButton.BackColor = running ? Color.White : Theme.Accent;
@@ -1488,6 +1457,12 @@ internal sealed class MainForm : Form
         tray.Text = tip.Length > 63 ? tip.Substring(0, 63) : tip;
         trayStatus.Text = status.Substring(2);
         trayToggle.Text = running ? L.T("停止接收", "Stop receiving") : L.T("开始接收", "Start receiving");
+    }
+
+    private void ShowError(string text)
+    {
+        errorLabel.Text = text;
+        errorLabel.Visible = text.Length > 0;
     }
 
     // ------------------------------------------------------------ dialogs
@@ -1558,6 +1533,66 @@ internal sealed class OutputFormat
     };
 }
 
+// The output devices the engine can open, with the same names it matches
+// against. Listing them starts the engine, which takes a moment, so the last
+// list is kept and new scans run in the background.
+internal static class OutputDevices
+{
+    private static readonly object gate = new object();
+    private static List<string> cached;
+    private static bool scanning;
+    private static Action<List<string>> waiting;
+
+    // null until the first scan finishes.
+    public static List<string> Cached { get { lock (gate) return cached; } }
+
+    // Starts a scan unless one is running; done (may be null) is called on a
+    // worker thread with the result.
+    public static void Refresh(Action<List<string>> done)
+    {
+        lock (gate) {
+            if (done != null) waiting += done;
+            if (scanning) return;
+            scanning = true;
+        }
+        ThreadPool.QueueUserWorkItem(delegate {
+            List<string> names = Scan();
+            Action<List<string>> callbacks;
+            lock (gate) {
+                if (names != null) cached = names;
+                else names = cached;
+                callbacks = waiting;
+                waiting = null;
+                scanning = false;
+            }
+            if (callbacks != null) callbacks(names);
+        });
+    }
+
+    private static List<string> Scan()
+    {
+        try {
+            List<string> names = new List<string>();
+            string exe = Path.Combine(AppDomain.CurrentDomain.BaseDirectory, "AirPlay2Engine.exe");
+            ProcessStartInfo info = new ProcessStartInfo {
+                FileName = exe, Arguments = "-list-devices", WorkingDirectory = AppDomain.CurrentDomain.BaseDirectory,
+                UseShellExecute = false, CreateNoWindow = true, RedirectStandardOutput = true, StandardOutputEncoding = Encoding.UTF8,
+            };
+            using (Process p = Process.Start(info)) {
+                string line;
+                while ((line = p.StandardOutput.ReadLine()) != null) {
+                    // DEVICE <index> <name>
+                    if (!line.StartsWith("DEVICE ", StringComparison.Ordinal)) continue;
+                    int space = line.IndexOf(' ', 7);
+                    if (space > 0) names.Add(line.Substring(space + 1));
+                }
+                p.WaitForExit(3000);
+            }
+            return names;
+        } catch (Exception) { return null; }
+    }
+}
+
 internal sealed class AdvancedForm : Form
 {
     private readonly Settings settings;
@@ -1566,7 +1601,6 @@ internal sealed class AdvancedForm : Form
     private readonly ComboBox device = new ComboBox();
     private readonly ComboBox format = new ComboBox();
     private readonly ComboBox dither = new ComboBox();
-    private readonly NumericUpDown volumeRange = new NumericUpDown();
     private readonly NumericUpDown delay = new NumericUpDown();
     private readonly CheckBox synchronize = new CheckBox();
     private readonly ComboBox anchor = new ComboBox();
@@ -1584,6 +1618,7 @@ internal sealed class AdvancedForm : Form
     private readonly NumericUpDown deviceIdOffset = new NumericUpDown();
     private readonly CheckBox trace = new CheckBox();
     private readonly CheckBox statistics = new CheckBox();
+    private List<string> shownDevices;
     public bool Changed { get; private set; }
 
     public AdvancedForm(Settings s)
@@ -1607,6 +1642,7 @@ internal sealed class AdvancedForm : Form
         TableLayoutPanel right = Column(new Padding(18, 0, 0, 0));
         root.Controls.Add(left, 0, 0);
         root.Controls.Add(right, 1, 0);
+        root.SuspendLayout(); left.SuspendLayout(); right.SuspendLayout();
 
         // ---- left: network, playback, output, troubleshooting
 
@@ -1623,20 +1659,20 @@ internal sealed class AdvancedForm : Form
         netRow.Controls.Add(network, 0, 0);
         netRow.Controls.Add(refresh, 1, 0);
         Row(g, null, netRow, null);
-        Row(g, null, Note(L.T("电脑有多个网卡（如虚拟机、VPN）时，选择和 iPhone 处于同一局域网的那一个。", "If this PC has several network adapters (for example virtual machines or VPNs), choose the one on the same local network as your iPhone.")), null);
+        Row(g, null, Note(L.T("选择监听的网卡", "Choose the network adapter to listen on")), null);
         Row(g, null, Check(ipv4Only, L.T("只使用 IPv4", "Use IPv4 only"), s.IPv4Only), null);
 
         g = Section(left, L.T("播放", "Playback"));
         Row(g, null, Check(synchronize, L.T("按发送端时间同步播放（推荐）", "Sync playback to the sender's clock (recommended)"), s.Synchronize), null);
-        Row(g, null, Note(L.T("关闭后延迟更低，但看视频时声音可能和画面对不上，多个音箱之间也不再同步。", "Turning this off lowers latency, but sound may drift out of sync with video, and multiple speakers no longer play in sync.")), null);
+        Row(g, null, Note(L.T("关闭后延迟低，但可能出现音画不同步", "Lower latency when off, but sound may drift out of sync with video")), null);
         Number(delay, -500, 500, s.DelayMs, 0, 10);
         Row(g, L.T("输出延迟补偿", "Output delay"), delay, L.T("毫秒", "ms"));
-        Row(g, null, Note(L.T("使用蓝牙耳机或音箱时，如果声音比画面慢，可以填一个正数（例如 150）。", "With Bluetooth headphones or speakers, if sound lags behind video, enter a positive value (for example 150).")), null);
+        Row(g, null, Note(L.T("如果声音比画面慢，可尝试增加补偿", "If sound lags behind video, try increasing the delay")), null);
         anchor.DropDownStyle = ComboBoxStyle.DropDownList; anchor.Width = 220;
         Choose(anchor, s.RealtimeAnchor, new NetworkChoice { Name = "shairport", Label = L.T("标准（与其他音箱同步）", "Standard (multi-room sync)") },
             new NetworkChoice { Name = "low-latency", Label = L.T("低延迟（约早 1.75 秒）", "Low latency (~1.75 s earlier)") });
         Row(g, L.T("实时流定时", "Realtime timing"), anchor, null);
-        Row(g, null, Note(L.T("iOS 上声音明显滞后时可以试试低延迟，但无法与 HomePod 等其他音箱组成多房间同步。", "Try low latency if sound clearly lags on iOS, but it cannot play in multi-room sync with HomePod or other speakers.")), null);
+        Row(g, null, Note(L.T("iOS 有声音明显滞后可使用低延迟模式", "If sound clearly lags on iOS, use low latency")), null);
 
         g = Section(left, L.T("音频输出", "Audio output"));
         device.DropDownStyle = ComboBoxStyle.DropDownList; device.Dock = DockStyle.Fill;
@@ -1652,9 +1688,6 @@ internal sealed class AdvancedForm : Form
         Choose(dither, s.Dither, new NetworkChoice { Name = "auto", Label = L.T("自动（16 位且调过音量或重采样时）", "Auto (16-bit with volume change or resampling)") },
             new NetworkChoice { Name = "on", Label = L.T("始终加入", "Always") }, new NetworkChoice { Name = "off", Label = L.T("关闭", "Off") });
         Row(g, L.T("抖动", "Dither"), dither, null);
-        Number(volumeRange, 10, 96, s.VolumeRangeDb, 0, 1);
-        Row(g, L.T("音量范围", "Volume range"), volumeRange, L.T("dB（发送端最小音量时的衰减）", "dB (at the lowest sender volume)"));
-        Row(g, null, Note(L.T("音量在接收端按 24 位以上精度处理。提高采样率会对音频做高质量重采样，不会提升音源本身的音质。", "Volume is applied at 24-bit or higher precision. A higher sample rate resamples the audio at high quality but does not improve the source itself.")), null);
 
         g = Section(left, L.T("故障排查", "Troubleshooting"));
         Row(g, null, Check(trace, L.T("记录详细的协议日志", "Log detailed protocol messages"), s.TraceLog), null);
@@ -1680,7 +1713,7 @@ internal sealed class AdvancedForm : Form
         Number(sessionTimeout, 0, 86400, s.SessionTimeout, 0, 10);
         Row(g, L.T("无响应断开", "Idle disconnect"), sessionTimeout, L.T("秒（0 不限）", "s (0 = never)"));
         Number(activeTimeout, 0, 86400, s.ActiveTimeout, 0, 5);
-        Row(g, L.T("停止播放后", "Release device after"), activeTimeout, L.T("秒释放设备（0 一直占用）", "s idle (0 = never)"));
+        Row(g, L.T("停止播放后", "Release device after"), activeTimeout, L.T("秒释放设备（0 不自动释放）", "s idle (0 = never)"));
         Row(g, null, Check(refuseInterruption, L.T("有设备连接时拒绝其他设备", "Refuse other devices while one is connected"), s.RefuseInterruption), null);
         Row(g, null, Note(L.T("不勾选时，后开始播放的设备会接管输出，之前的设备自动暂停。", "When unchecked, the device that starts playing last takes over, and the previous one pauses.")), null);
 
@@ -1702,7 +1735,7 @@ internal sealed class AdvancedForm : Form
         Row(g, L.T("音频端口数量", "Audio port count"), udpPortRange, L.T("个", "ports"));
         Number(deviceIdOffset, 0, 999, s.DeviceIdOffset, 0, 1);
         Row(g, L.T("设备 ID 偏移", "Device ID offset"), deviceIdOffset, null);
-        Row(g, null, Note(L.T("便于编写防火墙规则，或与其他 AirPlay 接收器同时运行（各自使用不同的端口和设备 ID 偏移）。", "Useful for firewall rules, or to run alongside other AirPlay receivers (each with its own ports and device ID offset).")), null);
+        Row(g, null, Note(L.T("修改以避免多实例间冲突", "Change these to avoid conflicts between instances")), null);
 
         synchronize.CheckedChanged += delegate { UpdateEnabled(); };
         driftCorrection.CheckedChanged += delegate { UpdateEnabled(); };
@@ -1720,12 +1753,13 @@ internal sealed class AdvancedForm : Form
         root.Controls.Add(buttons, 0, 1);
         root.SetColumnSpan(buttons, 2);
         AcceptButton = ok; CancelButton = cancel;
+        LoadInterfaces(s.NetworkInterface);
+        ShowDevices(OutputDevices.Cached, s.OutputDevice);
 
+        left.ResumeLayout(false); right.ResumeLayout(false); root.ResumeLayout(false);
         AutoScaleDimensions = new SizeF(96F, 96F);
         AutoScaleMode = AutoScaleMode.Dpi;
         ResumeLayout(true);
-        LoadInterfaces(s.NetworkInterface);
-        LoadDevices(s.OutputDevice);
     }
 
     // On a small or highly scaled screen, fit the dialog and scroll instead.
@@ -1740,6 +1774,12 @@ internal sealed class AdvancedForm : Form
         AutoScrollMargin = new Size(0, 14);
         Size = new Size(Math.Min(area.Width, size.Width + SystemInformation.VerticalScrollBarWidth), area.Height);
         Location = new Point(Math.Max(area.Left, Math.Min(Left, area.Right - Width)), area.Top);
+    }
+
+    protected override void OnShown(EventArgs e)
+    {
+        base.OnShown(e);
+        RefreshDevices(settings.OutputDevice);
     }
 
     private void UpdateEnabled()
@@ -1830,40 +1870,48 @@ internal sealed class AdvancedForm : Form
         return choice == null ? fallback : choice.Name;
     }
 
-    // The engine lists the devices it can open, with the same names it
-    // matches against.
-    private void LoadDevices(string selectName)
+    // The list is filled from the cache at once, and again in OnShown when a
+    // fresh scan finishes.
+    private void RefreshDevices(string selectName)
     {
-        List<string> names = new List<string>();
-        try {
-            string exe = Path.Combine(AppDomain.CurrentDomain.BaseDirectory, "AirPlay2Engine.exe");
-            ProcessStartInfo info = new ProcessStartInfo {
-                FileName = exe, Arguments = "-list-devices", WorkingDirectory = AppDomain.CurrentDomain.BaseDirectory,
-                UseShellExecute = false, CreateNoWindow = true, RedirectStandardOutput = true, StandardOutputEncoding = Encoding.UTF8,
-            };
-            using (Process p = Process.Start(info)) {
-                string line;
-                while ((line = p.StandardOutput.ReadLine()) != null) {
-                    // DEVICE <index> <name>
-                    if (!line.StartsWith("DEVICE ", StringComparison.Ordinal)) continue;
-                    int space = line.IndexOf(' ', 7);
-                    if (space > 0) names.Add(line.Substring(space + 1));
-                }
-                p.WaitForExit(3000);
-            }
-        } catch (Exception) { }
+        OutputDevices.Refresh(delegate(List<string> names) {
+            if (IsDisposed || !IsHandleCreated) return;
+            try {
+                BeginInvoke((MethodInvoker)delegate {
+                    if (!IsDisposed && !SameDevices(names)) ShowDevices(names, Chosen(device, selectName));
+                });
+            } catch (InvalidOperationException) { }
+        });
+    }
+
+    private bool SameDevices(List<string> names)
+    {
+        if (names == null || shownDevices == null || names.Count != shownDevices.Count) return names == shownDevices;
+        for (int i = 0; i < names.Count; i++) if (names[i] != shownDevices[i]) return false;
+        return true;
+    }
+
+    private void ShowDevices(List<string> names, string selectName)
+    {
+        shownDevices = names;
+        device.BeginUpdate();
         device.Items.Clear();
         device.Items.Add(new NetworkChoice { Name = "", Label = L.T("Windows 默认设备（跟随系统切换）", "Windows default device (follows the system)") });
         int selected = 0;
-        foreach (string name in names) {
-            device.Items.Add(new NetworkChoice { Name = name, Label = name });
-            if (name == selectName) selected = device.Items.Count - 1;
+        if (names != null) {
+            foreach (string name in names) {
+                device.Items.Add(new NetworkChoice { Name = name, Label = name });
+                if (name == selectName) selected = device.Items.Count - 1;
+            }
         }
         if (selected == 0 && !String.IsNullOrEmpty(selectName)) {
-            device.Items.Add(new NetworkChoice { Name = selectName, Label = selectName + L.T("（当前不可用）", " (not available)") });
+            // While the first scan runs, the saved device is shown without a note.
+            string label = names == null ? selectName : selectName + L.T("（当前不可用）", " (not available)");
+            device.Items.Add(new NetworkChoice { Name = selectName, Label = label });
             selected = device.Items.Count - 1;
         }
         device.SelectedIndex = selected;
+        device.EndUpdate();
     }
 
     private static Label Title(string text)
@@ -1931,7 +1979,6 @@ internal sealed class AdvancedForm : Form
         n.OutputRate = outputFormat.Rate;
         n.OutputBits = outputFormat.Bits;
         n.Dither = Chosen(dither, settings.Dither);
-        n.VolumeRangeDb = (int)volumeRange.Value;
         n.TraceLog = trace.Checked;
         n.Statistics = statistics.Checked;
         n.DriftCorrection = driftCorrection.Checked;
@@ -1953,7 +2000,7 @@ internal sealed class AdvancedForm : Form
         Changed = n.NetworkInterface != settings.NetworkInterface || n.IPv4Only != settings.IPv4Only
             || n.DelayMs != settings.DelayMs || n.Synchronize != settings.Synchronize || n.RealtimeAnchor != settings.RealtimeAnchor
             || n.OutputDevice != settings.OutputDevice || n.OutputRate != settings.OutputRate || n.OutputBits != settings.OutputBits
-            || n.Dither != settings.Dither || n.VolumeRangeDb != settings.VolumeRangeDb
+            || n.Dither != settings.Dither
             || n.TraceLog != settings.TraceLog || n.Statistics != settings.Statistics
             || n.DriftCorrection != settings.DriftCorrection || n.DriftToleranceMs != settings.DriftToleranceMs
             || n.ResyncThresholdMs != settings.ResyncThresholdMs
@@ -1974,7 +2021,6 @@ internal sealed class AdvancedForm : Form
         settings.OutputRate = n.OutputRate;
         settings.OutputBits = n.OutputBits;
         settings.Dither = n.Dither;
-        settings.VolumeRangeDb = n.VolumeRangeDb;
         settings.TraceLog = n.TraceLog;
         settings.Statistics = n.Statistics;
         settings.DriftCorrection = n.DriftCorrection;
@@ -2014,7 +2060,6 @@ internal sealed class PlaybackMonitor
     public long LeadMin, LeadMax;
     public long Rx, Miss, Late, Req, Rec, Full;
     public long TotalRx, TotalMiss, TotalLate, TotalReq, TotalRec, TotalFull, TotalResyncs, TotalDropped;
-    public DateTime Since = DateTime.Now;
     public string OutputDevice = "", OutputFormat = "";
     public event Action Changed;
 
@@ -2052,7 +2097,6 @@ internal sealed class PlaybackMonitor
     public void ResetTotals()
     {
         TotalRx = TotalMiss = TotalLate = TotalReq = TotalRec = TotalFull = TotalResyncs = TotalDropped = 0;
-        Since = DateTime.Now;
         Raise();
     }
 
@@ -2133,20 +2177,6 @@ internal sealed class PlaybackMonitor
     }
 
     public bool HasNetworkCounts { get { return Mode == "realtime" || Mode == "classic"; } }
-
-    // One line for the main window while playing.
-    public string Summary()
-    {
-        if (!HaveData || !Streaming) return "";
-        StringBuilder b = new StringBuilder(ModeText());
-        b.Append(" · ").Append(Codec == "l16" ? "PCM" : Codec.ToUpperInvariant());
-        if (RateText().Length > 0) b.Append(" · ").Append(RateText());
-        if (BitrateText().Length > 0) b.Append(" · ").Append(BitrateText());
-        if (!Synchronized) b.Append(L.T(" · 低延迟", " · Low latency"));
-        if (LatencyMs != 0) b.Append(L.T(" · 延迟 ", " · Latency ")).Append(LatencyMs).Append(" ms");
-        if (HasNetworkCounts) b.Append(L.T(" · 丢包 ", " · Loss ")).Append(LossPercent(TotalRx, TotalMiss).ToString("0.0", CultureInfo.InvariantCulture)).Append("%");
-        return b.ToString();
-    }
 }
 
 internal sealed class MonitorForm : Form
@@ -2156,7 +2186,6 @@ internal sealed class MonitorForm : Form
     private readonly Label mode = new Label(), codec = new Label(), rate = new Label(), bitrate = new Label(), sync = new Label(), clock = new Label(), output = new Label();
     private readonly Label latency = new Label(), latencyCaption = new Label(), delay = new Label(), buffer = new Label(), error = new Label(), correction = new Label(), resyncs = new Label();
     private readonly Label packets = new Label(), loss = new Label(), resend = new Label(), late = new Label(), lead = new Label(), underrun = new Label();
-    private readonly Label footer = new Label();
 
     public MonitorForm(PlaybackMonitor model, Icon icon)
     {
@@ -2204,11 +2233,6 @@ internal sealed class MonitorForm : Form
         Row(g, L.T("迟到/重复", "Late/duplicate"), late);
         Row(g, L.T("到达提前量", "Arrival lead"), lead);
         Row(g, L.T("输出", "Output"), underrun);
-
-        footer.AutoSize = true;
-        footer.ForeColor = Theme.SubText;
-        footer.Margin = new Padding(2, 0, 0, 0);
-        root.Controls.Add(footer);
 
         AutoScaleDimensions = new SizeF(96F, 96F);
         AutoScaleMode = AutoScaleMode.Dpi;
@@ -2333,24 +2357,12 @@ internal sealed class MonitorForm : Form
         } else {
             Set(underrun, streaming ? L.T("已暂停", "Paused") : none, Theme.Text);
         }
-
-        TimeSpan span = DateTime.Now - m.Since;
-        footer.Text = streaming
-            ? L.T("每秒刷新 · 累计数据自本次连接开始（" + FormatSpan(span) + "）", "Updated every second · Totals since this connection started (" + FormatSpan(span) + ")")
-            : L.T("每秒刷新 · 有设备播放时显示数据", "Updated every second · Data appears while a device is playing");
     }
 
     private static string FormatBuffer(double ms)
     {
         if (ms >= 1000) return (ms / 1000).ToString("0.0", CultureInfo.InvariantCulture) + L.T(" 秒", " s");
         return Math.Round(ms) + " ms";
-    }
-
-    private static string FormatSpan(TimeSpan span)
-    {
-        if (span.TotalHours >= 1) return (int)span.TotalHours + L.T(" 小时 ", " h ") + span.Minutes + L.T(" 分", " min");
-        if (span.TotalMinutes >= 1) return (int)span.TotalMinutes + L.T(" 分 ", " min ") + span.Seconds + L.T(" 秒", " s");
-        return span.Seconds + L.T(" 秒", " s");
     }
 }
 
