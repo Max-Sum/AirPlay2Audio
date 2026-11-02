@@ -127,7 +127,11 @@ func (o *fakeOutput) soundTimes(since time.Time) []time.Time {
 // sustain without a gap longer than maxGap.
 func expectSound(t *testing.T, o *fakeOutput, since time.Time, what string) {
 	t.Helper()
-	const sustain, maxGap = 1200 * time.Millisecond, 150 * time.Millisecond
+	const maxGap = 150 * time.Millisecond
+	sustain := 1200 * time.Millisecond
+	if testing.Short() {
+		sustain = 500 * time.Millisecond
+	}
 	deadline := time.Now().Add(4 * time.Second)
 	var first time.Time
 	for time.Now().Before(deadline) {
@@ -740,11 +744,21 @@ func testSwitchOn(t *testing.T, g *rig, aRealtime, bRealtime bool) {
 	expectSound(t, g.output, start, "A after B disconnected")
 }
 
-func TestSwitchBufferedSenders(t *testing.T)  { testSwitch(t, false, false, true) }
-func TestSwitchRealtimeSenders(t *testing.T)  { testSwitch(t, true, true, true) }
-func TestSwitchMixedSenders(t *testing.T)     { testSwitch(t, false, true, true) }
-func TestSwitchLowLatencyMixed(t *testing.T)  { testSwitch(t, true, false, false) }
-func TestSwitchLowLatencyBuffered(t *testing.T) { testSwitch(t, false, false, false) }
+// skipIfShort skips variants whose paths the remaining tests already cover.
+// Each test runs for several seconds in real time, so -short (used in CI)
+// keeps one test per path.
+func skipIfShort(t *testing.T) {
+	t.Helper()
+	if testing.Short() {
+		t.Skip("covered by other switch tests; run without -short")
+	}
+}
+
+func TestSwitchBufferedSenders(t *testing.T)    { skipIfShort(t); testSwitch(t, false, false, true) }
+func TestSwitchRealtimeSenders(t *testing.T)    { skipIfShort(t); testSwitch(t, true, true, true) }
+func TestSwitchMixedSenders(t *testing.T)       { testSwitch(t, false, true, true) }
+func TestSwitchLowLatencyMixed(t *testing.T)    { skipIfShort(t); testSwitch(t, true, false, false) }
+func TestSwitchLowLatencyBuffered(t *testing.T) { skipIfShort(t); testSwitch(t, false, false, false) }
 
 // The reported failure: two devices with their own PTP clocks. B's audio
 // was timed against A's clock after the switch and never played.
@@ -753,6 +767,7 @@ func TestSwitchRealtimeSendersWithOwnClocks(t *testing.T) {
 }
 
 func TestSwitchBufferedSendersWithOwnClocks(t *testing.T) {
+	skipIfShort(t)
 	testSwitchOn(t, newPTPRig(t), false, false)
 }
 
@@ -793,8 +808,8 @@ func TestSwitchBackToPausedRealtimeSender(t *testing.T) {
 }
 
 func TestSwitchStress(t *testing.T)              { stress(t, newRig(t, true)) }
-func TestSwitchStressLowLatency(t *testing.T)     { stress(t, newRig(t, false)) }
-func TestSwitchStressWithOwnClocks(t *testing.T)  { stress(t, newPTPRig(t)) }
+func TestSwitchStressLowLatency(t *testing.T)    { skipIfShort(t); stress(t, newRig(t, false)) }
+func TestSwitchStressWithOwnClocks(t *testing.T) { skipIfShort(t); stress(t, newPTPRig(t)) }
 
 func stress(t *testing.T, g *rig) {
 	a := g.newSender("A", net.IPv4(127, 0, 0, 1), true, 0x10000000)

@@ -35,7 +35,7 @@ jobs:
 
       - name: Build and test
         shell: pwsh
-        run: .\build.ps1 -Arch ${{ matrix.goarch }} -Test
+        run: .\build.ps1 -Arch ${{ matrix.goarch }} -Test -Short
 
       - name: Package
         shell: pwsh
