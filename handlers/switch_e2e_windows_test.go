@@ -575,7 +575,6 @@ func newRig(t *testing.T, synchronized bool) *rig {
 	if err != nil {
 		t.Fatal(err)
 	}
-	t.Setenv("PATH", root+string(os.PathListSeparator)+os.Getenv("PATH"))
 	if globals.ErrLog == nil {
 		globals.ErrLog = log.New(os.Stderr, "", log.LstdFlags)
 	}

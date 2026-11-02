@@ -14,11 +14,7 @@ try {
     if (-not (Test-Path -LiteralPath $GoExe)) { throw 'Go 1.26 or newer is required. Install Go or pass -GoExe with its full path.' }
     $compiler = Join-Path $env:WINDIR 'Microsoft.NET\Framework64\v4.0.30319\csc.exe'
     if (-not (Test-Path -LiteralPath $compiler)) { throw 'The .NET Framework C# compiler was not found.' }
-    foreach ($dependency in @('libfdk-aac-2.dll', 'libgcc_s_seh-1.dll', 'libstdc++-6.dll', 'libwinpthread-1.dll')) {
-        if (-not (Test-Path -LiteralPath $dependency)) { throw "Missing runtime dependency: $dependency" }
-    }
     $env:CGO_ENABLED = '0'
-    $env:PATH = "$PSScriptRoot;$env:PATH"
     if ($Test) {
         & $GoExe test ./...
         if ($LASTEXITCODE -ne 0) { throw 'Go tests failed.' }

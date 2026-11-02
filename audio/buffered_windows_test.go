@@ -21,11 +21,6 @@ import (
 // Exercise actual AAC-LC decoding after authenticating an AirPlay type-103
 // packet, using a generated sine wave rather than a copyrighted recording.
 func TestEncryptedBufferedAACDecode(t *testing.T) {
-	root, err := filepath.Abs("..")
-	if err != nil {
-		t.Fatal(err)
-	}
-	t.Setenv("PATH", root+string(os.PathListSeparator)+os.Getenv("PATH"))
 	file, err := os.Open(filepath.Join("testdata", "sine-aac-lc.bin"))
 	if err != nil {
 		t.Fatal(err)
@@ -105,11 +100,6 @@ func TestAuthenticatedEmptyAccessUnitIsIgnored(t *testing.T) {
 }
 
 func TestNextStreamGetsANewDecoder(t *testing.T) {
-	root, err := filepath.Abs("..")
-	if err != nil {
-		t.Fatal(err)
-	}
-	t.Setenv("PATH", root+string(os.PathListSeparator)+os.Getenv("PATH"))
 	globals.ErrLog = log.New(io.Discard, "", 0)
 	player := NewPlayer(ptp.NewVirtualClock(0), NewRing(4))
 	server, err := NewServer(player)
