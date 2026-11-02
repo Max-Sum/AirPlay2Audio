@@ -12,6 +12,8 @@ An AirPlay 2 and AirPlay 1 audio receiver for Windows. An iPhone, iPad, Mac or A
 
 Audio plays on the Windows default output device. To choose a device or output format, open 高级设置 → 音频输出 (Advanced → Audio output).
 
+AAC audio is decoded by the AAC decoder built into Windows. Windows N and KN editions include it only after the Media Feature Pack is installed.
+
 Settings and the pairing identity live in `%APPDATA%\AirPlay2Audio`. Deleting that folder resets the receiver's identity, and paired devices have to pair again.
 
 ### Command line
@@ -31,7 +33,6 @@ Requirements:
 - Windows x64
 - Go 1.26 or newer
 - The .NET Framework C# compiler (`csc.exe`) that ships with Windows
-- These runtime DLLs in the repository root: `libfdk-aac-2.dll`, `libgcc_s_seh-1.dll`, `libstdc++-6.dll`, `libwinpthread-1.dll`. Install `mingw-w64-x86_64-fdk-aac` in MSYS2 and copy them from `C:\msys64\mingw64\bin`.
 
 Build and run the tests:
 
@@ -185,6 +186,7 @@ PTP always uses UDP ports 319 and 320, and only one program can hold them. An in
 
 - `tools/protocol_probe.py` connects to a running local receiver and checks its protocol responses.
 - `tools/mock_sender` sends a silent mock PTP/AAC stream. Its second argument is the port.
+- `tools/generate_aac_fixtures.py` regenerates the AAC test data in `audio/testdata` with ffmpeg.
 - `tools/mock_raop` simulates an AirPlay 1 sender. It checks Apple-Response, sends encrypted ALAC and answers NTP. For example, `go run ./tools/mock_raop -port 7000 -seconds 5`.
 
 ## Acknowledgements
