@@ -156,3 +156,28 @@ func TestSuspendPausesAndBlocksPush(t *testing.T) {
 	}
 	close(done)
 }
+
+func TestSilenceWatchReportsSustainedSilence(t *testing.T) {
+	silent := &PCMFrame{pcmData: make([]byte, 352*4)}
+	sound := &PCMFrame{pcmData: make([]byte, 352*4)}
+	for i := 0; i < len(sound.pcmData); i += 2 {
+		sound.pcmData[i+1] = 0x10
+	}
+	var w silenceWatch
+	frames := int(int64(silenceReportAfter)*sampleRate/int64(time.Second))/352 + 1
+	for i := 0; i < frames-2; i++ {
+		w.observe(silent)
+	}
+	if w.reported {
+		t.Fatal("reported before the silence lasted long enough")
+	}
+	w.observe(silent)
+	w.observe(silent)
+	if !w.reported {
+		t.Fatal("sustained silence not reported")
+	}
+	w.observe(sound)
+	if w.reported || w.silent != 0 {
+		t.Fatal("sound did not reset the watch")
+	}
+}

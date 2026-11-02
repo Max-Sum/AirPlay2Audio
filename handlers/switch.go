@@ -72,6 +72,17 @@ func (r *Rstp) publishGroup() {
 	if r.advertise != nil {
 		r.advertise()
 	}
+	if state.active {
+		// A sender that connected while another one played was told that
+		// other session's group and state; tell it the output is now its own.
+		host := remoteHost(r.active)
+		name := r.sender(r.active).name
+		go func() {
+			if err := event.SendUpdateInfoTo(host); err != nil && err != event.ErrNoSession {
+				log.Printf("EVENT updateInfo to %q not sent: %v", name, err)
+			}
+		}()
+	}
 }
 
 // SetAdvertise sets the function that publishes changed TXT records.

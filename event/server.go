@@ -11,6 +11,7 @@ import (
 	"strconv"
 	"strings"
 	"sync"
+	"time"
 
 	"github.com/brutella/hc/crypto/chacha20poly1305"
 	"github.com/brutella/hc/crypto/hkdf"
@@ -18,16 +19,62 @@ import (
 	"howett.net/plist"
 )
 
-var pairingKeys sync.Map // remote IP -> short-lived pairing secret ([]byte)
+// A pairing waiting for the event channel the sender opens next.
+type pendingPairing struct {
+	secret []byte
+	at     time.Time
+}
+
+var (
+	pairingMu   sync.Mutex
+	pairingKeys = map[string]pendingPairing{} // RTSP remote IP -> secret
+)
+
+// A sender opens its event channel right after SETUP, a few seconds at most
+// after pairing; an older pairing is not matched by address alone.
+const pairingMatchWindow = 30 * time.Second
 
 // RegisterPairing makes the verified session secret available to the event
 // connection which the same sender opens during SETUP. The secret is the
 // pair-verify shared key, or the SRP session key for transient pairing.
 func RegisterPairing(address net.Addr, sharedKey []byte) {
 	host, _, err := net.SplitHostPort(address.String())
-	if err == nil {
-		pairingKeys.Store(host, append([]byte(nil), sharedKey...))
+	if err != nil {
+		return
 	}
+	pairingMu.Lock()
+	pairingKeys[host] = pendingPairing{secret: append([]byte(nil), sharedKey...), at: time.Now()}
+	pairingMu.Unlock()
+}
+
+// takePairing returns the secret for an event channel from host, and the
+// address the sender paired from. A Mac with several IPv6 addresses may open
+// the event channel from a different address than its RTSP connection; the
+// most recent pairing is used then.
+func takePairing(host string, now time.Time) (secret []byte, rtspHost string, ok bool) {
+	pairingMu.Lock()
+	defer pairingMu.Unlock()
+	for other, p := range pairingKeys {
+		if now.Sub(p.at) > 10*pairingMatchWindow {
+			delete(pairingKeys, other) // never collected
+		}
+	}
+	if p, found := pairingKeys[host]; found {
+		delete(pairingKeys, host)
+		return p.secret, host, true
+	}
+	var latest string
+	for other, p := range pairingKeys {
+		if now.Sub(p.at) <= pairingMatchWindow && (latest == "" || p.at.After(pairingKeys[latest].at)) {
+			latest = other
+		}
+	}
+	if latest == "" {
+		return nil, "", false
+	}
+	p := pairingKeys[latest]
+	delete(pairingKeys, latest)
+	return p.secret, latest, true
 }
 
 func Serve(listener net.Listener) {
@@ -50,14 +97,17 @@ func handleEventConnection(conn net.Conn) {
 	if err != nil {
 		return
 	}
-	value, ok := pairingKeys.LoadAndDelete(host)
+	secret, rtspHost, ok := takePairing(host, time.Now())
 	if !ok {
 		log.Print("EVENT connection has no verified session")
 		_, _ = io.Copy(io.Discard, conn)
 		return
 	}
-	secret := value.([]byte)
-	s := &session{conn: conn, writer: &eventWriter{writer: conn, key: outgoingKey(secret)}, host: host}
+	if rtspHost != host {
+		log.Printf("EVENT channel from %s belongs to the sender paired from %s", host, rtspHost)
+	}
+	// Known by the RTSP address, which is how the handlers name senders.
+	s := &session{conn: conn, writer: &eventWriter{writer: conn, key: outgoingKey(secret)}, host: rtspHost}
 	setCurrent(s)
 	defer clearCurrent(s)
 	log.Print("EVENT channel connected")

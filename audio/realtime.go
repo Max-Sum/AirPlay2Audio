@@ -171,6 +171,7 @@ func (s *Server) receiveRealtime(conn *net.UDPConn, decodePacket func([]byte) (*
 	noAudioCheck := time.After(5 * time.Second)
 	decodedTotal := uint64(0)
 	var standby standbyWatch
+	var quiet silenceWatch
 	// Bytes around the audio in a datagram: the RTP header, plus for
 	// AirPlay 2 the nonce and authentication tag.
 	overhead := 36
@@ -256,6 +257,7 @@ func (s *Server) receiveRealtime(conn *net.UDPConn, decodePacket func([]byte) (*
 		}
 		standby.reset()
 		if frame != nil {
+			quiet.observe(frame)
 			received++
 			decodedTotal++
 			s.addBytes(len(datagram.data) - overhead)
