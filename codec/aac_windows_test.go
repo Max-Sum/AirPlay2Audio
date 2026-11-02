@@ -10,16 +10,41 @@ import (
 	"testing"
 )
 
-// Every access unit must decode at once to 1024 stereo frames. A decoder
-// that held output back would shift the audio against its timestamps.
-func TestAacDecoderOutputsEveryFrameAtOnce(t *testing.T) {
+// readUnits reads a fixture: big-endian 16-bit lengths followed by raw AAC
+// access units.
+func readUnits(t *testing.T, fixture string) [][]byte {
+	t.Helper()
+	file, err := os.Open(filepath.Join("..", "audio", "testdata", fixture))
+	if err != nil {
+		t.Fatal(err)
+	}
+	defer file.Close()
+	var units [][]byte
+	for {
+		var size uint16
+		if err := binary.Read(file, binary.BigEndian, &size); err == io.EOF {
+			return units
+		} else if err != nil {
+			t.Fatal(err)
+		}
+		unit := make([]byte, size)
+		if _, err := io.ReadFull(file, unit); err != nil {
+			t.Fatal(err)
+		}
+		units = append(units, unit)
+	}
+}
+
+// The decoder outputs each access unit one unit late. After that, every
+// unit must decode to exactly 1024 stereo frames, so outputs stay paired
+// with the units they came from.
+func TestAacDecoderOutputsOneFramePerUnit(t *testing.T) {
 	for _, test := range []struct {
 		fixture string
 		asc     []byte
 	}{
 		{"sine-aac-lc.bin", []byte{0x12, 0x10}},
 		{"sine-aac-lc-5.1.bin", []byte{0x11, 0xb0}},
-		{"sine-aac-lc-7.1.bin", []byte{0x11, 0xb8}},
 	} {
 		t.Run(test.fixture, func(t *testing.T) {
 			d := NewAacDecoder()
@@ -31,29 +56,20 @@ func TestAacDecoderOutputsEveryFrameAtOnce(t *testing.T) {
 				t.Fatal(err)
 			}
 			t.Logf("decoder output: %d channels", d.channels)
-			file, err := os.Open(filepath.Join("..", "audio", "testdata", test.fixture))
-			if err != nil {
-				t.Fatal(err)
-			}
-			defer file.Close()
+			units := readUnits(t, test.fixture)
 			var peak int16
-			for i := 0; ; i++ {
-				var size uint16
-				if err := binary.Read(file, binary.BigEndian, &size); err == io.EOF {
-					break
-				} else if err != nil {
-					t.Fatal(err)
-				}
-				unit := make([]byte, size)
-				if _, err := io.ReadFull(file, unit); err != nil {
-					t.Fatal(err)
-				}
+			delay := 0
+			for i, unit := range units {
 				pcm, err := d.Decode(unit)
 				if err != nil {
 					t.Fatalf("unit %d: %v", i, err)
 				}
+				if len(pcm) == 0 && i == delay && delay < 1 {
+					delay++
+					continue
+				}
 				if len(pcm) != 1024*4 {
-					t.Fatalf("unit %d decoded to %d bytes, want %d", i, len(pcm), 1024*4)
+					t.Fatalf("unit %d decoded to %d bytes, want %d (decoder delay %d)", i, len(pcm), 1024*4, delay)
 				}
 				for j := 0; j+1 < len(pcm); j += 2 {
 					peak = max(peak, int16(binary.LittleEndian.Uint16(pcm[j:])))
@@ -66,6 +82,14 @@ func TestAacDecoderOutputsEveryFrameAtOnce(t *testing.T) {
 	}
 }
 
+func TestAacDecoderRejects71(t *testing.T) {
+	d := NewAacDecoder()
+	defer d.Close()
+	if err := d.InitRaw([]byte{0x11, 0xb8}); err == nil {
+		t.Fatal("7.1 accepted")
+	}
+}
+
 func TestAacDecoderRejectsGarbage(t *testing.T) {
 	d := NewAacDecoder()
 	if err := d.InitRaw([]byte{0x12, 0x10}); err != nil {
@@ -75,23 +99,21 @@ func TestAacDecoderRejectsGarbage(t *testing.T) {
 	if _, err := d.Decode([]byte{0xde, 0xad, 0xbe, 0xef}); err == nil {
 		t.Log("decoder accepted garbage without an error")
 	}
-	// The decoder must still work afterwards.
-	file, err := os.Open(filepath.Join("..", "audio", "testdata", "sine-aac-lc.bin"))
-	if err != nil {
-		t.Fatal(err)
+	// The decoder must still work afterwards, within its one-unit delay.
+	units := readUnits(t, "sine-aac-lc.bin")
+	for i, unit := range units[:3] {
+		pcm, err := d.Decode(unit)
+		if err != nil {
+			t.Fatalf("unit %d after garbage: %v", i, err)
+		}
+		if len(pcm) == 1024*4 {
+			return
+		}
+		if len(pcm) != 0 {
+			t.Fatalf("unit %d after garbage: %d bytes", i, len(pcm))
+		}
 	}
-	defer file.Close()
-	var size uint16
-	if err := binary.Read(file, binary.BigEndian, &size); err != nil {
-		t.Fatal(err)
-	}
-	unit := make([]byte, size)
-	if _, err := io.ReadFull(file, unit); err != nil {
-		t.Fatal(err)
-	}
-	if pcm, err := d.Decode(unit); err != nil || len(pcm) != 1024*4 {
-		t.Fatalf("after garbage: %d bytes, %v", len(pcm), err)
-	}
+	t.Fatal("no audio after garbage")
 }
 
 func TestASCInfo(t *testing.T) {

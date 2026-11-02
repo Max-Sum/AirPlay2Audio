@@ -37,15 +37,14 @@ func readAACFixture(t *testing.T, name string) [][]byte {
 	}
 }
 
-// 5.1 and 7.1 AAC are decoded and downmixed to stereo; the sine in the
-// front channels must come through, at the player's 44.1 kHz.
+// 5.1 AAC is decoded and downmixed to stereo; the sine in the front
+// channels must come through, at the player's 44.1 kHz.
 func TestBufferedDecoderDownmixesSurround(t *testing.T) {
 	for _, test := range []struct {
 		fixture string
 		ssrc    uint32
 	}{
 		{"sine-aac-lc-5.1.bin", ssrcAAC48000x51},
-		{"sine-aac-lc-7.1.bin", ssrcAAC48000x71},
 	} {
 		t.Run(test.fixture, func(t *testing.T) {
 			packets := readAACFixture(t, test.fixture)
@@ -76,5 +75,21 @@ func TestBufferedDecoderDownmixesSurround(t *testing.T) {
 				t.Fatalf("decoded %d frames with peak %d; the downmix lost the front channels", decoded, peak)
 			}
 		})
+	}
+}
+
+// The Windows AAC decoder cannot decode 7.1: it is not advertised, and its
+// packets are skipped without ending the stream.
+func TestBuffered71IsSkippedOnWindows(t *testing.T) {
+	if SupportedBufferedFormat(audioFormatAAC48000x71) {
+		t.Fatal("7.1 advertised")
+	}
+	d := newBufferedDecoder(formatAAC44100, newRTPMapper(48000))
+	defer d.Close()
+	for i, payload := range readAACFixture(t, "sine-aac-lc-7.1.bin") {
+		packet := TcpPacket{Packet: rtp.Packet{Header: rtp.Header{SSRC: ssrcAAC48000x71, Timestamp: uint32(i * 1024)}}}
+		if frame, err := d.decode(packet, payload); err != nil || frame != nil {
+			t.Fatalf("packet %d: frame=%v error=%v", i, frame, err)
+		}
 	}
 }

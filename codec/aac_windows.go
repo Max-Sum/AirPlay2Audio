@@ -173,7 +173,12 @@ type mfOutputDataBuffer struct {
 }
 
 // AacDecoder decodes raw AAC access units to interleaved 16-bit stereo PCM.
-// Multichannel streams are always downmixed to stereo.
+// Multichannel streams are always downmixed to stereo. The decoder accepts
+// up to 5.1; it rejects 7.1.
+//
+// The decoder outputs each access unit one unit late: Decode returns nothing
+// for the first unit, then the previous unit's audio. Callers that track
+// timestamps must pair each output with the unit it came from.
 type AacDecoder struct {
 	mft         uintptr
 	rate        int
@@ -226,6 +231,9 @@ func (d *AacDecoder) InitRaw(asc []byte) error {
 	rate, channels, err := ascInfo(asc)
 	if err != nil {
 		return err
+	}
+	if channels > 6 {
+		return fmt.Errorf("the Windows AAC decoder does not support %d-channel audio", channels)
 	}
 	if err := startMediaFoundation(); err != nil {
 		return err
