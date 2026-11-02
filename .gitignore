@@ -6,5 +6,3 @@ aiwa
 # Build output (build.ps1)
 *.exe
 *.exe.old
-# Runtime DLLs copied from MSYS2 (see README.md); not source.
-*.dll
