@@ -12,7 +12,7 @@
 
 音频默认从 Windows 的默认输出设备播放，可以在"高级设置 → 音频输出"中指定设备和格式。
 
-界面支持简体中文和英文，默认跟随 Windows 显示语言，可在"常规 → 语言"中切换，重启程序后生效。
+AAC 音频由 Windows 自带的 AAC 解码器解码。Windows N 和 KN 版需要先安装 Media Feature Pack。
 
 设置和配对身份保存在 `%APPDATA%\AirPlay2Audio`。删除这个目录会重置接收器身份，已配对的设备需要重新配对。
 
@@ -33,7 +33,6 @@ AirPlay2Engine.exe -n "客厅" -output-device 2 -statistics
 - Windows x64
 - Go 1.26 或更新版本
 - Windows 自带的 .NET Framework C# 编译器 (`csc.exe`)
-- 仓库根目录下的运行时 DLL：`libfdk-aac-2.dll`、`libgcc_s_seh-1.dll`、`libstdc++-6.dll`、`libwinpthread-1.dll`。可以在 MSYS2 中安装 `mingw-w64-x86_64-fdk-aac`，再从 `C:\msys64\mingw64\bin` 复制。
 
 构建并运行测试：
 
@@ -189,6 +188,7 @@ PTP 固定使用 UDP 319 和 320，同一时间只能有一个程序占用。后
 
 - `tools/protocol_probe.py` 连接正在运行的本地接收器，检查协议响应。
 - `tools/mock_sender` 发送静音的模拟 PTP/AAC 流，第二个参数是端口。
+- `tools/generate_aac_fixtures.py` 用 ffmpeg 重新生成 `audio/testdata` 中的 AAC 测试数据。
 - `tools/mock_raop` 模拟 AirPlay 1 发送端。它验证 Apple-Response，发送加密的 ALAC，并应答 NTP。例如 `go run ./tools/mock_raop -port 7000 -seconds 5`。
 
 ## 致谢
