@@ -15,7 +15,7 @@ import (
 	"sync"
 	"time"
 
-	"github.com/grandcat/zeroconf"
+	"github.com/Max-Sum/AirPlay2Audio/internal/zeroconf"
 )
 
 // Commands, by the MediaRemote numbers used on the AirPlay 2 event channel

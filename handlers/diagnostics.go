@@ -11,7 +11,7 @@ import (
 	"sync"
 	"time"
 
-	"github.com/grandcat/zeroconf"
+	"github.com/Max-Sum/AirPlay2Audio/internal/zeroconf"
 	"github.com/Max-Sum/AirPlay2Audio/globals"
 	"github.com/Max-Sum/AirPlay2Audio/rtsp"
 	"howett.net/plist"
