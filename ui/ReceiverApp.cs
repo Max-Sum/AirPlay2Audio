@@ -1642,7 +1642,6 @@ internal sealed class AdvancedForm : Form
         TableLayoutPanel right = Column(new Padding(18, 0, 0, 0));
         root.Controls.Add(left, 0, 0);
         root.Controls.Add(right, 1, 0);
-        root.SuspendLayout(); left.SuspendLayout(); right.SuspendLayout();
 
         // ---- left: network, playback, output, troubleshooting
 
@@ -1753,13 +1752,12 @@ internal sealed class AdvancedForm : Form
         root.Controls.Add(buttons, 0, 1);
         root.SetColumnSpan(buttons, 2);
         AcceptButton = ok; CancelButton = cancel;
-        LoadInterfaces(s.NetworkInterface);
-        ShowDevices(OutputDevices.Cached, s.OutputDevice);
 
-        left.ResumeLayout(false); right.ResumeLayout(false); root.ResumeLayout(false);
         AutoScaleDimensions = new SizeF(96F, 96F);
         AutoScaleMode = AutoScaleMode.Dpi;
         ResumeLayout(true);
+        LoadInterfaces(s.NetworkInterface);
+        ShowDevices(OutputDevices.Cached, s.OutputDevice);
     }
 
     // On a small or highly scaled screen, fit the dialog and scroll instead.
