@@ -1,0 +1,10 @@
+.idea
+# directory for storing RTPS session
+goplay
+aiwa
+
+# Build output (build.ps1)
+*.exe
+*.exe.old
+# Runtime DLLs copied from MSYS2 (see README.zh-CN.md); not source.
+*.dll

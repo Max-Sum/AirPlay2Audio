@@ -1,0 +1,38 @@
+package rtsp
+
+import (
+	"bufio"
+	"fmt"
+)
+
+const (
+	rtspMaxContentLength = 4 * 1024 * 1024 // cover artwork can exceed 128 KiB
+)
+
+func readByteEqual(rb *bufio.Reader, cmp byte) error {
+	byt, err := rb.ReadByte()
+	if err != nil {
+		return err
+	}
+
+	if byt != cmp {
+		return fmt.Errorf("expected '%c', got '%c'", cmp, byt)
+	}
+
+	return nil
+}
+
+func readBytesLimited(rb *bufio.Reader, delim byte, n int) ([]byte, error) {
+	for i := 1; i <= n; i++ {
+		byts, err := rb.Peek(i)
+		if err != nil {
+			return nil, err
+		}
+
+		if byts[len(byts)-1] == delim {
+			rb.Discard(len(byts))
+			return byts, nil
+		}
+	}
+	return nil, fmt.Errorf("buffer length exceeds %d", n)
+}

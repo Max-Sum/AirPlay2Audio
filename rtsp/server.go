@@ -1,0 +1,117 @@
+package rtsp
+
+import (
+	"bufio"
+	"errors"
+	"goplay2/globals"
+	"io"
+	"net"
+)
+
+const (
+	serverConnReadBufferSize  = 4096
+	serverConnWriteBufferSize = 4096
+)
+
+type Handler interface {
+	Handle(conn *Conn, req *Request) (*Response, error)
+	OnRequest(conn *Conn, request *Request)
+	OnResponse(conn *Conn, resp *Response)
+	OnConnOpen(conn *Conn)
+	OnConnClose(conn *Conn)
+}
+
+type Server struct {
+	h  Handler
+	bw *bufio.Writer
+	br *bufio.Reader
+}
+
+type Conn struct {
+	c net.Conn
+}
+
+func (c *Conn) NetConn() net.Conn {
+	return c.c
+}
+
+func (c *Conn) Close() error {
+	return c.c.Close()
+}
+
+func (c *Conn) SetNetConn(conn net.Conn) {
+	c.c = conn
+}
+
+func Serve(l net.Listener, handlers Handler) error {
+
+	defer l.Close()
+	for {
+
+		conn, err := l.Accept()
+		if err != nil {
+			globals.ErrLog.Println("Error accepting: ", err.Error())
+			return err
+		}
+		rConn := &Conn{
+			c: conn,
+		}
+		s := &Server{h: handlers}
+		s.h.OnConnOpen(rConn)
+		go s.handleRstpConnection(rConn)
+	}
+}
+
+func (s *Server) handleRstpConnection(conn *Conn) {
+	defer conn.Close()
+	defer s.h.OnConnClose(conn)
+	defer func() {
+		if recovered := recover(); recovered != nil {
+			globals.ErrLog.Printf("RTSP connection ended after malformed request")
+		}
+	}()
+
+	s.br = bufio.NewReaderSize(conn.NetConn(), serverConnReadBufferSize)
+	s.bw = bufio.NewWriterSize(conn.NetConn(), serverConnWriteBufferSize)
+
+	for {
+		request, err := parseRequest(s.br)
+		if err != nil {
+			if !errors.Is(err, io.EOF) && !errors.Is(err, net.ErrClosed) {
+				globals.ErrLog.Printf("Error parsing RSTP request %v \n", err)
+			}
+			return
+		}
+		s.h.OnRequest(conn, request)
+		response, err := s.h.Handle(conn, request)
+		if err != nil {
+			globals.ErrLog.Printf("Error handling RSTP request %v \n", err)
+			return
+		}
+		err = s.flushResponse(conn, request, response)
+		if err != nil {
+			globals.ErrLog.Printf("Error flusing RSTP response %v \n", err)
+			return
+		}
+	}
+
+}
+
+func (s *Server) flushResponse(conn *Conn, req *Request, resp *Response) error {
+	if resp.Header == nil {
+		resp.Header = make(Header)
+	}
+	resp.Header["CSeq"] = req.Header["CSeq"]
+	resp.Header["Server"] = HeaderValue{"AirTunes/366.0"}
+	s.h.OnResponse(conn, resp)
+	return resp.Write(s.bw)
+}
+
+func parseRequest(br *bufio.Reader) (*Request, error) {
+	var req Request
+	var err error
+	if err = req.Read(br); err != nil {
+		return nil, err
+	}
+	return &req, nil
+}
