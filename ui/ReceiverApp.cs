@@ -57,7 +57,35 @@ internal static class Program
             }
             GC.KeepAlive(mutex);
         }
+        // Started again only after the mutex is released, so the new copy
+        // does not hand over to this one.
+        if (MainForm.RestartRequested) {
+            try { Process.Start(Application.ExecutablePath); } catch (Exception) { }
+        }
     }
+}
+
+// ---------------------------------------------------------------- language
+
+// Interface language: Simplified Chinese or English. Strings are written
+// in pairs at the point of use: L.T("中文", "English").
+internal static class L
+{
+    public const string Auto = "", Chinese = "zh", English = "en";
+
+    public static bool Zh { get; private set; }
+
+    static L() { Init(Auto); }
+
+    // setting: Auto (follow the Windows display language), Chinese or English.
+    public static void Init(string setting)
+    {
+        if (setting == Chinese) Zh = true;
+        else if (setting == English) Zh = false;
+        else Zh = CultureInfo.CurrentUICulture.Name.StartsWith("zh", StringComparison.OrdinalIgnoreCase);
+    }
+
+    public static string T(string zh, string en) { return Zh ? zh : en; }
 }
 
 // ---------------------------------------------------------------- media keys
@@ -108,7 +136,7 @@ internal sealed class MediaSession
     public static MediaSession Create(IntPtr window, Action<string> command)
     {
         try { return CreateControls(window, command); }
-        catch (Exception ex) { LogStore.Add("系统媒体控制不可用，媒体键将无法使用：" + ex.Message); return null; }
+        catch (Exception ex) { LogStore.Add(L.T("系统媒体控制不可用，媒体键将无法使用：", "System media controls are unavailable; media keys will not work: ") + ex.Message); return null; }
     }
 
     private static MediaSession CreateControls(IntPtr window, Action<string> command)
@@ -159,7 +187,7 @@ internal sealed class MediaSession
             UpdateDisplay();
             SetPaused(paused);
         } catch (Exception ex) {
-            LogStore.Add("更新系统媒体控制失败：" + ex.Message);
+            LogStore.Add(L.T("更新系统媒体控制失败：", "Failed to update the system media controls: ") + ex.Message);
         }
     }
 
@@ -196,7 +224,7 @@ internal sealed class MediaSession
                     break;
             }
         } catch (Exception ex) {
-            LogStore.Add("更新系统媒体控制失败：" + ex.Message);
+            LogStore.Add(L.T("更新系统媒体控制失败：", "Failed to update the system media controls: ") + ex.Message);
         }
     }
 
@@ -301,6 +329,7 @@ internal sealed class Settings
     public int OutputRate = 44100;
     public int OutputBits = 16;
     public bool Statistics = false;
+    public string Language = L.Auto;
     public string Dither = "auto"; // auto, on or off
     public int VolumeRangeDb = 60;
     public string RealtimeAnchor = "shairport"; // shairport or low-latency
@@ -378,6 +407,7 @@ internal sealed class Settings
             case "OutputRate": if (Int32.TryParse(value, out n) && OutputFormat.ValidRate(n)) OutputRate = n; break;
             case "OutputBits": if (Int32.TryParse(value, out n) && (n == 16 || n == 24 || n == 32)) OutputBits = n; break;
             case "Statistics": if (Boolean.TryParse(value, out b)) Statistics = b; break;
+            case "Language": if (value == L.Chinese || value == L.English) Language = value; break;
             case "Dither": if (value == "auto" || value == "on" || value == "off") Dither = value; break;
             case "VolumeRangeDb": if (Int32.TryParse(value, out n)) VolumeRangeDb = Math.Max(10, Math.Min(96, n)); break;
             case "RealtimeAnchor": if (value == "shairport" || value == "low-latency") RealtimeAnchor = value; break;
@@ -440,6 +470,7 @@ internal sealed class Settings
                 "OutputRate=" + OutputRate.ToString(CultureInfo.InvariantCulture),
                 "OutputBits=" + OutputBits.ToString(CultureInfo.InvariantCulture),
                 "Statistics=" + Statistics,
+                "Language=" + Language,
                 "Dither=" + Dither,
                 "VolumeRangeDb=" + VolumeRangeDb.ToString(CultureInfo.InvariantCulture),
                 "RealtimeAnchor=" + RealtimeAnchor,
@@ -564,7 +595,7 @@ internal sealed class Engine
     {
         if (process != null) return;
         string exe = Path.Combine(AppDomain.CurrentDomain.BaseDirectory, "AirPlay2Engine.exe");
-        if (!File.Exists(exe)) throw new FileNotFoundException("找不到 AirPlay2Engine.exe，请保留程序目录中的全部文件。");
+        if (!File.Exists(exe)) throw new FileNotFoundException(L.T("找不到 AirPlay2Engine.exe，请保留程序目录中的全部文件。", "AirPlay2Engine.exe was not found. Keep all files in the program folder together."));
         StringBuilder args = new StringBuilder();
         args.Append("-n ").Append(Quote(s.DeviceName));
         args.Append(" -delay ").Append(s.DelayMs.ToString(CultureInfo.InvariantCulture));
@@ -931,11 +962,14 @@ internal sealed class MainForm : Form
     private readonly PlaybackMonitor monitor = new PlaybackMonitor();
     private MonitorForm monitorForm;
 
+    public static bool RestartRequested { get; private set; }
+
     public MainForm(bool background)
     {
+        L.Init(settings.Language);
         startInBackground = background;
         SuspendLayout();
-        Text = "AirPlay 2 音频接收器";
+        Text = L.T("AirPlay 2 音频接收器", "AirPlay 2 Audio Receiver");
         Font = Theme.Regular(10f);
         BackColor = Theme.Window;
         ForeColor = Theme.Text;
@@ -968,7 +1002,7 @@ internal sealed class MainForm : Form
         logo.Margin = new Padding(0, 2, 14, 0);
         header.Controls.Add(logo, 0, 0);
         header.SetRowSpan(logo, 2);
-        Label title = new Label { Text = "AirPlay 2 音频接收器", Font = Theme.Bold(15f), AutoSize = true, Margin = new Padding(0, 0, 0, 2) };
+        Label title = new Label { Text = L.T("AirPlay 2 音频接收器", "AirPlay 2 Audio Receiver"), Font = Theme.Bold(15f), AutoSize = true, Margin = new Padding(0, 0, 0, 2) };
         header.Controls.Add(title, 1, 0);
         statusLabel.AutoSize = true;
         statusLabel.Font = Theme.Bold(11f);
@@ -982,7 +1016,7 @@ internal sealed class MainForm : Form
         detailLabel.Margin = new Padding(0, 0, 0, 12);
         root.Controls.Add(detailLabel);
 
-        toggleButton = Theme.MakeButton("开始接收", true);
+        toggleButton = Theme.MakeButton(L.T("开始接收", "Start receiving"), true);
         toggleButton.AutoSize = false;
         toggleButton.Dock = DockStyle.Fill;
         toggleButton.MinimumSize = new Size(0, 44);
@@ -992,7 +1026,7 @@ internal sealed class MainForm : Form
         root.Controls.Add(toggleButton);
 
         // Receiver card.
-        root.Controls.Add(SectionTitle("接收器"));
+        root.Controls.Add(SectionTitle(L.T("接收器", "Receiver")));
         Card receiverCard = new Card { Margin = new Padding(0, 0, 0, 14) };
         TableLayoutPanel grid = FieldGrid();
         nameBox.Text = settings.DeviceName;
@@ -1001,7 +1035,7 @@ internal sealed class MainForm : Form
         nameBox.Margin = new Padding(0, 4, 0, 8);
         nameBox.Leave += delegate { ApplyName(); };
         nameBox.KeyDown += delegate(object s, KeyEventArgs e) { if (e.KeyCode == Keys.Enter) { e.SuppressKeyPress = true; ApplyName(); } };
-        AddField(grid, "设备名称", nameBox);
+        AddField(grid, L.T("设备名称", "Device name"), nameBox);
 
         FlowLayoutPanel passwordRow = new FlowLayoutPanel { AutoSize = true, WrapContents = false, Margin = new Padding(0), Anchor = AnchorStyles.Left, BackColor = Theme.Card };
         passwordBox.Text = settings.Password;
@@ -1011,12 +1045,12 @@ internal sealed class MainForm : Form
         passwordBox.Margin = new Padding(0, 4, 8, 4);
         passwordBox.Leave += delegate { ApplyPassword(); };
         passwordBox.KeyDown += delegate(object s, KeyEventArgs e) { if (e.KeyCode == Keys.Enter) { e.SuppressKeyPress = true; ApplyPassword(); } };
-        ConfigureCheck(showPasswordBox, "显示");
+        ConfigureCheck(showPasswordBox, L.T("显示", "Show"));
         showPasswordBox.Margin = new Padding(0, 6, 0, 0);
         showPasswordBox.CheckedChanged += delegate { passwordBox.UseSystemPasswordChar = !showPasswordBox.Checked; };
         passwordRow.Controls.Add(passwordBox);
         passwordRow.Controls.Add(showPasswordBox);
-        AddField(grid, "访问密码", passwordRow);
+        AddField(grid, L.T("访问密码", "Password"), passwordRow);
 
         FlowLayoutPanel volumeRow = new FlowLayoutPanel { AutoSize = true, WrapContents = false, Margin = new Padding(0), Anchor = AnchorStyles.Left };
         volumeBar.Minimum = 0; volumeBar.Maximum = 100; volumeBar.TickStyle = TickStyle.None;
@@ -1037,56 +1071,57 @@ internal sealed class MainForm : Form
         volumeValue.Margin = new Padding(0, 7, 0, 0);
         volumeRow.Controls.Add(volumeBar);
         volumeRow.Controls.Add(volumeValue);
-        AddField(grid, "本机音量", volumeRow);
+        AddField(grid, L.T("本机音量", "Local volume"), volumeRow);
 
         senderVolume.AutoSize = true;
         senderVolume.Text = "—";
         senderVolume.Margin = new Padding(0, 6, 0, 4);
-        AddField(grid, "发送端音量", senderVolume);
+        AddField(grid, L.T("发送端音量", "Sender volume"), senderVolume);
 
         FlowLayoutPanel mediaRow = new FlowLayoutPanel { AutoSize = true, WrapContents = false, Margin = new Padding(0, 2, 0, 2), Anchor = AnchorStyles.Left, BackColor = Theme.Card };
-        Button previous = Theme.MakeButton("上一首", false);
+        Button previous = Theme.MakeButton(L.T("上一首", "Previous"), false);
         previous.Click += delegate { engine.SendMedia("previous"); };
-        Button toggle = Theme.MakeButton("播放/暂停", false);
+        Button toggle = Theme.MakeButton(L.T("播放/暂停", "Play/Pause"), false);
         toggle.Click += delegate { engine.SendMedia("toggle"); };
-        Button next = Theme.MakeButton("下一首", false);
+        Button next = Theme.MakeButton(L.T("下一首", "Next"), false);
         next.Click += delegate { engine.SendMedia("next"); };
         foreach (Button b in new Button[] { previous, toggle, next }) { b.Margin = new Padding(0, 0, 8, 0); mediaRow.Controls.Add(b); }
-        AddField(grid, "播放控制", mediaRow);
+        AddField(grid, L.T("播放控制", "Playback"), mediaRow);
         receiverCard.Controls.Add(grid);
         root.Controls.Add(receiverCard);
 
         // General options card.
-        root.Controls.Add(SectionTitle("常规"));
+        root.Controls.Add(SectionTitle(L.T("常规", "General")));
         Card generalCard = new Card { Margin = new Padding(0, 0, 0, 14) };
         FlowLayoutPanel options = new FlowLayoutPanel { FlowDirection = FlowDirection.TopDown, AutoSize = true, WrapContents = false, Dock = DockStyle.Top, BackColor = Theme.Card };
-        ConfigureCheck(autoStartBox, "开机时自动启动（在后台运行）");
+        ConfigureCheck(autoStartBox, L.T("开机时自动启动（在后台运行）", "Start with Windows (in the background)"));
         autoStartBox.Checked = AutoStart.IsEnabled();
         autoStartBox.CheckedChanged += delegate {
             try { AutoStart.Set(autoStartBox.Checked); }
-            catch (Exception ex) { MessageBox.Show(this, "无法修改开机启动设置：" + ex.Message, Text, MessageBoxButtons.OK, MessageBoxIcon.Warning); }
+            catch (Exception ex) { MessageBox.Show(this, L.T("无法修改开机启动设置：", "Could not change the startup setting: ") + ex.Message, Text, MessageBoxButtons.OK, MessageBoxIcon.Warning); }
         };
-        ConfigureCheck(autoReceiveBox, "打开程序后自动开始接收");
+        ConfigureCheck(autoReceiveBox, L.T("打开程序后自动开始接收", "Start receiving when the program opens"));
         autoReceiveBox.Checked = settings.AutoStartReceiver;
         autoReceiveBox.CheckedChanged += delegate { settings.AutoStartReceiver = autoReceiveBox.Checked; settings.Save(); };
-        ConfigureCheck(closeToTrayBox, "关闭窗口时保留在通知区域");
+        ConfigureCheck(closeToTrayBox, L.T("关闭窗口时保留在通知区域", "Keep running in the notification area when closed"));
         closeToTrayBox.Checked = settings.CloseToTray;
         closeToTrayBox.CheckedChanged += delegate { settings.CloseToTray = closeToTrayBox.Checked; settings.Save(); };
         options.Controls.Add(autoStartBox);
         options.Controls.Add(autoReceiveBox);
         options.Controls.Add(closeToTrayBox);
+        options.Controls.Add(LanguageRow());
         generalCard.Controls.Add(options);
         root.Controls.Add(generalCard);
 
         // Bottom buttons.
         FlowLayoutPanel buttons = new FlowLayoutPanel { AutoSize = true, Dock = DockStyle.Fill, WrapContents = true, Margin = new Padding(0) };
-        Button advanced = Theme.MakeButton("高级设置…", false);
+        Button advanced = Theme.MakeButton(L.T("高级设置…", "Advanced settings…"), false);
         advanced.Click += delegate { ShowAdvanced(); };
-        Button monitorButton = Theme.MakeButton("播放监控", false);
+        Button monitorButton = Theme.MakeButton(L.T("播放监控", "Playback monitor"), false);
         monitorButton.Click += delegate { ShowMonitor(); };
-        Button logs = Theme.MakeButton("运行日志", false);
+        Button logs = Theme.MakeButton(L.T("运行日志", "Log"), false);
         logs.Click += delegate { ShowLog(); };
-        Button sound = Theme.MakeButton("Windows 声音设置", false);
+        Button sound = Theme.MakeButton(L.T("Windows 声音设置", "Windows sound settings"), false);
         sound.Click += delegate { try { Process.Start("ms-settings:sound"); } catch (Exception) { } };
         foreach (Button b in new Button[] { advanced, monitorButton, logs, sound }) { b.Margin = new Padding(0, 0, 8, 8); buttons.Controls.Add(b); }
         root.Controls.Add(buttons);
@@ -1109,6 +1144,30 @@ internal sealed class MainForm : Form
         SetState(ReceiverState.Stopped);
     }
 
+    // Captioned in both languages, so it can be found in either.
+    private Control LanguageRow()
+    {
+        FlowLayoutPanel row = new FlowLayoutPanel { AutoSize = true, WrapContents = false, Margin = new Padding(0, 6, 0, 2), BackColor = Theme.Card };
+        Label caption = new Label { Text = "语言 / Language", AutoSize = true, Margin = new Padding(0, 6, 10, 0) };
+        ComboBox language = new ComboBox { DropDownStyle = ComboBoxStyle.DropDownList, Width = 180, Margin = new Padding(0, 2, 0, 2) };
+        string[] values = { L.Auto, L.Chinese, L.English };
+        language.Items.AddRange(new object[] { L.T("跟随系统", "System default"), "简体中文", "English" });
+        language.SelectedIndex = Math.Max(0, Array.IndexOf(values, settings.Language));
+        language.SelectedIndexChanged += delegate {
+            string value = values[language.SelectedIndex];
+            if (value == settings.Language) return;
+            settings.Language = value;
+            settings.Save();
+            DialogResult answer = MessageBox.Show(this,
+                L.T("重新启动程序后将使用新的语言。现在重新启动吗？", "The new language is used after the program restarts. Restart now?"),
+                Text, MessageBoxButtons.YesNo, MessageBoxIcon.Question);
+            if (answer == DialogResult.Yes) { RestartRequested = true; ExitApplication(); }
+        };
+        row.Controls.Add(caption);
+        row.Controls.Add(language);
+        return row;
+    }
+
     private static Label SectionTitle(string text)
     {
         return new Label { Text = text, Font = Theme.Bold(10.5f), AutoSize = true, Margin = new Padding(2, 0, 0, 6) };
@@ -1117,7 +1176,7 @@ internal sealed class MainForm : Form
     private static TableLayoutPanel FieldGrid()
     {
         TableLayoutPanel grid = new TableLayoutPanel { ColumnCount = 2, AutoSize = true, Dock = DockStyle.Top, BackColor = Theme.Card };
-        grid.ColumnStyles.Add(new ColumnStyle(SizeType.Absolute, 100));
+        grid.ColumnStyles.Add(new ColumnStyle(SizeType.Absolute, L.Zh ? 100 : 120));
         grid.ColumnStyles.Add(new ColumnStyle(SizeType.Percent, 100));
         return grid;
     }
@@ -1147,14 +1206,14 @@ internal sealed class MainForm : Form
         trayStatus.Enabled = false;
         menu.Items.Add(trayStatus);
         menu.Items.Add(new ToolStripSeparator());
-        ToolStripMenuItem open = new ToolStripMenuItem("打开主窗口");
+        ToolStripMenuItem open = new ToolStripMenuItem(L.T("打开主窗口", "Open main window"));
         open.Font = Theme.Bold(9.5f);
         open.Click += delegate { ShowFromTray(); };
         menu.Items.Add(open);
         trayToggle.Click += delegate { if (engine.Running) StopReceiver(); else StartReceiver(); };
         menu.Items.Add(trayToggle);
         menu.Items.Add(new ToolStripSeparator());
-        ToolStripMenuItem quit = new ToolStripMenuItem("退出");
+        ToolStripMenuItem quit = new ToolStripMenuItem(L.T("退出", "Exit"));
         quit.Click += delegate { ExitApplication(); };
         menu.Items.Add(quit);
         tray.ContextMenuStrip = menu;
@@ -1202,7 +1261,7 @@ internal sealed class MainForm : Form
             if (!settings.TrayTipShown) {
                 settings.TrayTipShown = true;
                 settings.Save();
-                tray.ShowBalloonTip(5000, "仍在后台运行", "AirPlay 接收器会继续工作。点击通知区域的图标可以重新打开，右键可以退出。", ToolTipIcon.Info);
+                tray.ShowBalloonTip(5000, L.T("仍在后台运行", "Still running in the background"), L.T("AirPlay 接收器会继续工作。点击通知区域的图标可以重新打开，右键可以退出。", "The AirPlay receiver keeps working. Click the notification area icon to reopen it, or right-click it to exit."), ToolTipIcon.Info);
             }
             return;
         }
@@ -1231,7 +1290,7 @@ internal sealed class MainForm : Form
         string name = nameBox.Text.Trim();
         if (name == settings.DeviceName) return;
         if (!ValidName(name)) {
-            MessageBox.Show(this, "设备名称不能为空，且不能超过 63 个字节（约 21 个汉字）。", Text, MessageBoxButtons.OK, MessageBoxIcon.Information);
+            MessageBox.Show(this, L.T("设备名称不能为空，且不能超过 63 个字节（约 21 个汉字）。", "The device name must not be empty or longer than 63 bytes."), Text, MessageBoxButtons.OK, MessageBoxIcon.Information);
             nameBox.Text = settings.DeviceName;
             return;
         }
@@ -1246,7 +1305,7 @@ internal sealed class MainForm : Form
         string password = passwordBox.Text;
         if (password == settings.Password) return;
         if (password.Trim().Length == 0 && password.Length > 0) {
-            MessageBox.Show(this, "密码不能只有空格。", Text, MessageBoxButtons.OK, MessageBoxIcon.Information);
+            MessageBox.Show(this, L.T("密码不能只有空格。", "The password cannot consist only of spaces."), Text, MessageBoxButtons.OK, MessageBoxIcon.Information);
             passwordBox.Text = settings.Password;
             return;
         }
@@ -1304,7 +1363,7 @@ internal sealed class MainForm : Form
     private string PlayingDetail()
     {
         string summary = monitor.Summary();
-        return summary.Length > 0 ? summary : "音频通过 Windows 默认播放设备输出。";
+        return summary.Length > 0 ? summary : L.T("音频通过 Windows 默认播放设备输出。", "Audio plays through the Windows default playback device.");
     }
     private static readonly Regex SenderPattern = new Regex("SESSION (?:started|active) sender=\"(.*)\"");
 
@@ -1320,7 +1379,7 @@ internal sealed class MainForm : Form
             return;
         }
         if (line.Contains("AUTH wrong password") && state == ReceiverState.Waiting) {
-            detailLabel.Text = "有设备输入了错误的访问密码，未能连接。";
+            detailLabel.Text = L.T("有设备输入了错误的访问密码，未能连接。", "A device entered the wrong password and could not connect.");
             return;
         }
         if (line.Contains("SESSION ended")) { senderName = ""; senderVolume.Text = "—"; SetState(ReceiverState.Waiting); return; }
@@ -1333,14 +1392,14 @@ internal sealed class MainForm : Form
         }
         m = OutputPattern.Match(line);
         if (m.Success) {
-            monitor.SetOutput(Regex.Unescape(m.Groups[1].Value), m.Groups[2].Value + " Hz / " + m.Groups[3].Value + " 位");
+            monitor.SetOutput(Regex.Unescape(m.Groups[1].Value), m.Groups[2].Value + " Hz / " + m.Groups[3].Value + L.T(" 位", "-bit"));
             return;
         }
         m = VolumePattern.Match(line);
         if (m.Success) {
             double db;
             if (Double.TryParse(m.Groups[1].Value, NumberStyles.Float, CultureInfo.InvariantCulture, out db)) {
-                senderVolume.Text = db <= -144 ? "静音" : Math.Round(Math.Max(0, Math.Min(1, (db + 30) / 30)) * 100) + "%";
+                senderVolume.Text = db <= -144 ? L.T("静音", "Muted") : Math.Round(Math.Max(0, Math.Min(1, (db + 30) / 30)) * 100) + "%";
             }
             return;
         }
@@ -1350,11 +1409,11 @@ internal sealed class MainForm : Form
     private string FriendlyError(string message)
     {
         if (message.Contains(settings.Port.ToString(CultureInfo.InvariantCulture)) || message.Contains(settings.EventPort.ToString(CultureInfo.InvariantCulture)) || message.Contains("319") || message.Contains("320") || message.Contains("bind"))
-            return "网络端口被占用。可能已有另一个 AirPlay 接收器（例如 UxPlay）在运行，请先关闭它。";
+            return L.T("网络端口被占用。可能已有另一个 AirPlay 接收器（例如 UxPlay）在运行，请先关闭它。", "A network port is in use. Another AirPlay receiver (such as UxPlay) may be running; close it first.");
         if (message.Contains("no active network interface"))
-            return "找不到可用的网络连接。请确认电脑已连上局域网，或在高级设置中选择网卡。";
+            return L.T("找不到可用的网络连接。请确认电脑已连上局域网，或在高级设置中选择网卡。", "No usable network connection was found. Make sure this PC is on the local network, or choose a network adapter in Advanced settings.");
         if (message.Contains("audio output"))
-            return "无法打开音频输出设备。请检查 Windows 声音设置中的默认播放设备。";
+            return L.T("无法打开音频输出设备。请检查 Windows 声音设置中的默认播放设备。", "Could not open the audio output device. Check the default playback device in Windows sound settings.");
         return message;
     }
 
@@ -1368,15 +1427,15 @@ internal sealed class MainForm : Form
             if (DateTime.Now - restartWindow > TimeSpan.FromMinutes(5)) { restartWindow = DateTime.Now; restartCount = 0; }
             if (restartCount < 3) {
                 restartCount++;
-                LogStore.Add("接收服务意外退出（代码 " + code + "），3 秒后自动重启。");
-                failure = "接收服务意外退出，正在重新启动…";
+                LogStore.Add(L.T("接收服务意外退出（代码 " + code + "），3 秒后自动重启。", "The receiver service exited unexpectedly (code " + code + "); restarting in 3 seconds."));
+                failure = L.T("接收服务意外退出，正在重新启动…", "The receiver service exited unexpectedly. Restarting…");
                 SetState(ReceiverState.Starting);
                 restartTimer.Interval = 3000;
                 restartTimer.Start();
                 return;
             }
         }
-        if (failure.Length == 0) failure = "接收服务已退出（代码 " + code + "）。详情请查看运行日志。";
+        if (failure.Length == 0) failure = L.T("接收服务已退出（代码 " + code + "）。详情请查看运行日志。", "The receiver service exited (code " + code + "). See the log for details.");
         SetState(ReceiverState.Failed);
     }
 
@@ -1389,46 +1448,46 @@ internal sealed class MainForm : Form
         Color color;
         switch (next) {
             case ReceiverState.Starting:
-                status = "● 正在启动"; color = Theme.Orange;
-                detail = failure.Length > 0 ? failure : "正在准备网络和音频设备…";
+                status = L.T("● 正在启动", "● Starting"); color = Theme.Orange;
+                detail = failure.Length > 0 ? failure : L.T("正在准备网络和音频设备…", "Preparing the network and audio device…");
                 break;
             case ReceiverState.Waiting:
-                status = "● 等待连接"; color = Theme.Green;
-                detail = "在 iPhone、iPad 或 Mac 的音频输出（AirPlay）列表中选择「" + name + "」。"
-                    + (settings.Password.Length > 0 ? "连接时需要输入访问密码。" : "");
+                status = L.T("● 等待连接", "● Waiting for a connection"); color = Theme.Green;
+                detail = L.T("在 iPhone、iPad 或 Mac 的音频输出（AirPlay）列表中选择「" + name + "」。", "Choose \u201c" + name + "\u201d in the audio output (AirPlay) list on your iPhone, iPad or Mac.")
+                    + (settings.Password.Length > 0 ? L.T("连接时需要输入访问密码。", " The password is required to connect.") : "");
                 break;
             case ReceiverState.Connected:
-                status = "● 已连接" + (senderName.Length > 0 ? "：" + senderName : ""); color = Theme.Green;
-                detail = "等待播放音频。";
+                status = L.T("● 已连接", "● Connected") + (senderName.Length > 0 ? L.T("：", ": ") + senderName : ""); color = Theme.Green;
+                detail = L.T("等待播放音频。", "Waiting for audio.");
                 break;
             case ReceiverState.Playing:
-                status = "● 正在播放" + (senderName.Length > 0 ? "：" + senderName : ""); color = Theme.Accent;
+                status = L.T("● 正在播放", "● Playing") + (senderName.Length > 0 ? L.T("：", ": ") + senderName : ""); color = Theme.Accent;
                 detail = PlayingDetail();
                 break;
             case ReceiverState.Failed:
-                status = "● 无法启动"; color = Theme.Red;
+                status = L.T("● 无法启动", "● Could not start"); color = Theme.Red;
                 detail = failure;
                 break;
             default:
-                status = "● 已停止"; color = Theme.Grey;
-                detail = "点击「开始接收」后，这台电脑会出现在 Apple 设备的 AirPlay 列表中。";
+                status = L.T("● 已停止", "● Stopped"); color = Theme.Grey;
+                detail = L.T("点击「开始接收」后，这台电脑会出现在 Apple 设备的 AirPlay 列表中。", "Click \u201cStart receiving\u201d to make this PC appear in the AirPlay list on Apple devices.");
                 break;
         }
         statusLabel.Text = status;
         statusLabel.ForeColor = color;
         detailLabel.Text = detail;
         bool running = engine.Running;
-        toggleButton.Text = running ? "停止接收" : "开始接收";
+        toggleButton.Text = running ? L.T("停止接收", "Stop receiving") : L.T("开始接收", "Start receiving");
         toggleButton.BackColor = running ? Color.White : Theme.Accent;
         toggleButton.ForeColor = running ? Theme.Text : Color.White;
         toggleButton.FlatAppearance.BorderColor = running ? Theme.Border : Theme.Accent;
         bool active = next == ReceiverState.Waiting || next == ReceiverState.Connected || next == ReceiverState.Playing;
         logo.Image = Theme.Logo(104, active || next == ReceiverState.Starting);
         tray.Icon = active ? activeIcon : idleIcon;
-        string tip = "AirPlay 2 音频接收器 - " + status.Substring(2);
+        string tip = L.T("AirPlay 2 音频接收器 - ", "AirPlay 2 Audio Receiver - ") + status.Substring(2);
         tray.Text = tip.Length > 63 ? tip.Substring(0, 63) : tip;
         trayStatus.Text = status.Substring(2);
-        trayToggle.Text = running ? "停止接收" : "开始接收";
+        trayToggle.Text = running ? L.T("停止接收", "Stop receiving") : L.T("开始接收", "Start receiving");
     }
 
     // ------------------------------------------------------------ dialogs
@@ -1483,8 +1542,8 @@ internal sealed class OutputFormat
     public override string ToString()
     {
         string rate = (Rate % 1000 == 0 ? (Rate / 1000).ToString(CultureInfo.InvariantCulture) : (Rate / 1000.0).ToString("0.0", CultureInfo.InvariantCulture)) + " kHz";
-        string text = rate + " / " + Bits + " 位";
-        return Rate == 44100 && Bits == 16 ? text + "（默认，不转换）" : text;
+        string text = rate + " / " + Bits + L.T(" 位", "-bit");
+        return Rate == 44100 && Bits == 16 ? text + L.T("（默认，不转换）", " (default, no conversion)") : text;
     }
     public static bool ValidRate(int rate)
     {
@@ -1531,7 +1590,7 @@ internal sealed class AdvancedForm : Form
     {
         settings = s;
         SuspendLayout();
-        Text = "高级设置";
+        Text = L.T("高级设置", "Advanced settings");
         Font = Theme.Regular(10f);
         BackColor = Theme.Window;
         FormBorderStyle = FormBorderStyle.FixedDialog;
@@ -1551,11 +1610,11 @@ internal sealed class AdvancedForm : Form
 
         // ---- left: network, playback, output, troubleshooting
 
-        TableLayoutPanel g = Section(left, "网络");
+        TableLayoutPanel g = Section(left, L.T("网络", "Network"));
         network.DropDownStyle = ComboBoxStyle.DropDownList;
         network.Dock = DockStyle.Fill;
         network.Margin = new Padding(0, 4, 8, 4);
-        Button refresh = Theme.MakeButton("刷新", false);
+        Button refresh = Theme.MakeButton(L.T("刷新", "Refresh"), false);
         refresh.Margin = new Padding(0, 1, 0, 1);
         refresh.Click += delegate { LoadInterfaces(SelectedInterface()); };
         TableLayoutPanel netRow = new TableLayoutPanel { ColumnCount = 2, AutoSize = true, Dock = DockStyle.Fill, BackColor = Theme.Card, Margin = new Padding(0) };
@@ -1564,43 +1623,43 @@ internal sealed class AdvancedForm : Form
         netRow.Controls.Add(network, 0, 0);
         netRow.Controls.Add(refresh, 1, 0);
         Row(g, null, netRow, null);
-        Row(g, null, Note("电脑有多个网卡（如虚拟机、VPN）时，选择和 iPhone 处于同一局域网的那一个。"), null);
-        Row(g, null, Check(ipv4Only, "只使用 IPv4", s.IPv4Only), null);
+        Row(g, null, Note(L.T("电脑有多个网卡（如虚拟机、VPN）时，选择和 iPhone 处于同一局域网的那一个。", "If this PC has several network adapters (for example virtual machines or VPNs), choose the one on the same local network as your iPhone.")), null);
+        Row(g, null, Check(ipv4Only, L.T("只使用 IPv4", "Use IPv4 only"), s.IPv4Only), null);
 
-        g = Section(left, "播放");
-        Row(g, null, Check(synchronize, "按发送端时间同步播放（推荐）", s.Synchronize), null);
-        Row(g, null, Note("关闭后延迟更低，但看视频时声音可能和画面对不上，多个音箱之间也不再同步。"), null);
+        g = Section(left, L.T("播放", "Playback"));
+        Row(g, null, Check(synchronize, L.T("按发送端时间同步播放（推荐）", "Sync playback to the sender's clock (recommended)"), s.Synchronize), null);
+        Row(g, null, Note(L.T("关闭后延迟更低，但看视频时声音可能和画面对不上，多个音箱之间也不再同步。", "Turning this off lowers latency, but sound may drift out of sync with video, and multiple speakers no longer play in sync.")), null);
         Number(delay, -500, 500, s.DelayMs, 0, 10);
-        Row(g, "输出延迟补偿", delay, "毫秒");
-        Row(g, null, Note("使用蓝牙耳机或音箱时，如果声音比画面慢，可以填一个正数（例如 150）。"), null);
+        Row(g, L.T("输出延迟补偿", "Output delay"), delay, L.T("毫秒", "ms"));
+        Row(g, null, Note(L.T("使用蓝牙耳机或音箱时，如果声音比画面慢，可以填一个正数（例如 150）。", "With Bluetooth headphones or speakers, if sound lags behind video, enter a positive value (for example 150).")), null);
         anchor.DropDownStyle = ComboBoxStyle.DropDownList; anchor.Width = 220;
-        Choose(anchor, s.RealtimeAnchor, new NetworkChoice { Name = "shairport", Label = "标准（与其他音箱同步）" },
-            new NetworkChoice { Name = "low-latency", Label = "低延迟（约早 1.75 秒）" });
-        Row(g, "实时流定时", anchor, null);
-        Row(g, null, Note("iOS 上声音明显滞后时可以试试低延迟，但无法与 HomePod 等其他音箱组成多房间同步。"), null);
+        Choose(anchor, s.RealtimeAnchor, new NetworkChoice { Name = "shairport", Label = L.T("标准（与其他音箱同步）", "Standard (multi-room sync)") },
+            new NetworkChoice { Name = "low-latency", Label = L.T("低延迟（约早 1.75 秒）", "Low latency (~1.75 s earlier)") });
+        Row(g, L.T("实时流定时", "Realtime timing"), anchor, null);
+        Row(g, null, Note(L.T("iOS 上声音明显滞后时可以试试低延迟，但无法与 HomePod 等其他音箱组成多房间同步。", "Try low latency if sound clearly lags on iOS, but it cannot play in multi-room sync with HomePod or other speakers.")), null);
 
-        g = Section(left, "音频输出");
+        g = Section(left, L.T("音频输出", "Audio output"));
         device.DropDownStyle = ComboBoxStyle.DropDownList; device.Dock = DockStyle.Fill;
         format.DropDownStyle = ComboBoxStyle.DropDownList; format.Dock = DockStyle.Fill;
-        Row(g, "设备", device, null);
-        Row(g, "格式", format, null);
+        Row(g, L.T("设备", "Device"), device, null);
+        Row(g, L.T("格式", "Format"), format, null);
         foreach (OutputFormat f in OutputFormat.All) {
             format.Items.Add(f);
             if (f.Rate == s.OutputRate && f.Bits == s.OutputBits) format.SelectedItem = f;
         }
         if (format.SelectedIndex < 0) format.SelectedIndex = 0;
         dither.DropDownStyle = ComboBoxStyle.DropDownList; dither.Dock = DockStyle.Fill;
-        Choose(dither, s.Dither, new NetworkChoice { Name = "auto", Label = "自动（16 位且调过音量或重采样时）" },
-            new NetworkChoice { Name = "on", Label = "始终加入" }, new NetworkChoice { Name = "off", Label = "关闭" });
-        Row(g, "抖动", dither, null);
+        Choose(dither, s.Dither, new NetworkChoice { Name = "auto", Label = L.T("自动（16 位且调过音量或重采样时）", "Auto (16-bit with volume change or resampling)") },
+            new NetworkChoice { Name = "on", Label = L.T("始终加入", "Always") }, new NetworkChoice { Name = "off", Label = L.T("关闭", "Off") });
+        Row(g, L.T("抖动", "Dither"), dither, null);
         Number(volumeRange, 10, 96, s.VolumeRangeDb, 0, 1);
-        Row(g, "音量范围", volumeRange, "dB（发送端最小音量时的衰减）");
-        Row(g, null, Note("音量在接收端按 24 位以上精度处理。提高采样率会对音频做高质量重采样，不会提升音源本身的音质。"), null);
+        Row(g, L.T("音量范围", "Volume range"), volumeRange, L.T("dB（发送端最小音量时的衰减）", "dB (at the lowest sender volume)"));
+        Row(g, null, Note(L.T("音量在接收端按 24 位以上精度处理。提高采样率会对音频做高质量重采样，不会提升音源本身的音质。", "Volume is applied at 24-bit or higher precision. A higher sample rate resamples the audio at high quality but does not improve the source itself.")), null);
 
-        g = Section(left, "故障排查");
-        Row(g, null, Check(trace, "记录详细的协议日志", s.TraceLog), null);
-        Row(g, null, Check(statistics, "每 10 秒记录同步误差、漂移校正和丢包统计", s.Statistics), null);
-        Button folder = Theme.MakeButton("打开数据文件夹", false);
+        g = Section(left, L.T("故障排查", "Troubleshooting"));
+        Row(g, null, Check(trace, L.T("记录详细的协议日志", "Log detailed protocol messages"), s.TraceLog), null);
+        Row(g, null, Check(statistics, L.T("每 10 秒记录同步误差、漂移校正和丢包统计", "Log sync error, drift correction and packet loss every 10 seconds"), s.Statistics), null);
+        Button folder = Theme.MakeButton(L.T("打开数据文件夹", "Open data folder"), false);
         folder.Click += delegate {
             try { Directory.CreateDirectory(Settings.Directory); Process.Start("explorer.exe", "\"" + Settings.Directory + "\""); } catch (Exception) { }
         };
@@ -1609,41 +1668,41 @@ internal sealed class AdvancedForm : Form
 
         // ---- right: drift correction, sessions, event commands, ports
 
-        g = Section(right, "漂移校正");
-        Row(g, null, Check(driftCorrection, "逐个增减采样，平滑校正时钟漂移（推荐）", s.DriftCorrection), null);
+        g = Section(right, L.T("漂移校正", "Drift correction"));
+        Row(g, null, Check(driftCorrection, L.T("逐个增减采样，平滑校正时钟漂移（推荐）", "Smooth drift correction, one sample at a time (recommended)"), s.DriftCorrection), null);
         Number(driftTolerance, 0.1m, 1000, (decimal)s.DriftToleranceMs, 1, 0.5m);
-        Row(g, "校正容差", driftTolerance, "毫秒");
+        Row(g, L.T("校正容差", "Tolerance"), driftTolerance, L.T("毫秒", "ms"));
         Number(resyncThreshold, 1, 10000, (decimal)s.ResyncThresholdMs, 0, 10);
-        Row(g, "跳变阈值", resyncThreshold, "毫秒");
-        Row(g, null, Note("误差超过容差时开始校正；持续超过跳变阈值（例如声卡欠载）时直接跳过或补静音。"), null);
+        Row(g, L.T("跳变阈值", "Resync threshold"), resyncThreshold, L.T("毫秒", "ms"));
+        Row(g, null, Note(L.T("误差超过容差时开始校正；持续超过跳变阈值（例如声卡欠载）时直接跳过或补静音。", "Correction starts when the error exceeds the tolerance. If it stays above the resync threshold (for example on a sound card underrun), audio is skipped or padded with silence.")), null);
 
-        g = Section(right, "会话");
+        g = Section(right, L.T("会话", "Sessions"));
         Number(sessionTimeout, 0, 86400, s.SessionTimeout, 0, 10);
-        Row(g, "无响应断开", sessionTimeout, "秒（0 不限）");
+        Row(g, L.T("无响应断开", "Idle disconnect"), sessionTimeout, L.T("秒（0 不限）", "s (0 = never)"));
         Number(activeTimeout, 0, 86400, s.ActiveTimeout, 0, 5);
-        Row(g, "停止播放后", activeTimeout, "秒释放设备（0 一直占用）");
-        Row(g, null, Check(refuseInterruption, "有设备连接时拒绝其他设备", s.RefuseInterruption), null);
-        Row(g, null, Note("不勾选时，后开始播放的设备会接管输出，之前的设备自动暂停。"), null);
+        Row(g, L.T("停止播放后", "Release device after"), activeTimeout, L.T("秒释放设备（0 一直占用）", "s idle (0 = never)"));
+        Row(g, null, Check(refuseInterruption, L.T("有设备连接时拒绝其他设备", "Refuse other devices while one is connected"), s.RefuseInterruption), null);
+        Row(g, null, Note(L.T("不勾选时，后开始播放的设备会接管输出，之前的设备自动暂停。", "When unchecked, the device that starts playing last takes over, and the previous one pauses.")), null);
 
-        g = Section(right, "事件命令");
-        Command(g, "开始播放", onPlayBegin, s.OnPlayBegin);
-        Command(g, "停止播放", onPlayEnd, s.OnPlayEnd);
-        Command(g, "打开输出设备", onActiveBegin, s.OnActiveBegin);
-        Command(g, "释放输出设备", onActiveEnd, s.OnActiveEnd);
-        Row(g, null, Note("通过 cmd.exe 运行，环境变量 AIRPLAY_EVENT 为事件名。留空不运行。"), null);
+        g = Section(right, L.T("事件命令", "Event commands"));
+        Command(g, L.T("开始播放", "Playback starts"), onPlayBegin, s.OnPlayBegin);
+        Command(g, L.T("停止播放", "Playback stops"), onPlayEnd, s.OnPlayEnd);
+        Command(g, L.T("打开输出设备", "Output device opened"), onActiveBegin, s.OnActiveBegin);
+        Command(g, L.T("释放输出设备", "Output device released"), onActiveEnd, s.OnActiveEnd);
+        Row(g, null, Note(L.T("通过 cmd.exe 运行，环境变量 AIRPLAY_EVENT 为事件名。留空不运行。", "Run with cmd.exe; the AIRPLAY_EVENT environment variable holds the event name. Leave empty to run nothing.")), null);
 
-        g = Section(right, "端口与多实例");
+        g = Section(right, L.T("端口与多实例", "Ports and multiple instances"));
         Number(port, 1, 65535, s.Port, 0, 1);
-        Row(g, "控制端口", port, "TCP");
+        Row(g, L.T("控制端口", "Control port"), port, "TCP");
         Number(eventPort, 1, 65535, s.EventPort, 0, 1);
-        Row(g, "事件端口", eventPort, "TCP");
+        Row(g, L.T("事件端口", "Event port"), eventPort, "TCP");
         Number(udpPortBase, 0, 65535, s.UdpPortBase, 0, 1);
-        Row(g, "音频端口起点", udpPortBase, "0 由系统分配");
+        Row(g, L.T("音频端口起点", "First audio port"), udpPortBase, L.T("0 由系统分配", "0 = chosen by the system"));
         Number(udpPortRange, 3, 65535, s.UdpPortRange, 0, 1);
-        Row(g, "音频端口数量", udpPortRange, "个");
+        Row(g, L.T("音频端口数量", "Audio port count"), udpPortRange, L.T("个", "ports"));
         Number(deviceIdOffset, 0, 999, s.DeviceIdOffset, 0, 1);
-        Row(g, "设备 ID 偏移", deviceIdOffset, null);
-        Row(g, null, Note("便于编写防火墙规则，或与其他 AirPlay 接收器同时运行（各自使用不同的端口和设备 ID 偏移）。"), null);
+        Row(g, L.T("设备 ID 偏移", "Device ID offset"), deviceIdOffset, null);
+        Row(g, null, Note(L.T("便于编写防火墙规则，或与其他 AirPlay 接收器同时运行（各自使用不同的端口和设备 ID 偏移）。", "Useful for firewall rules, or to run alongside other AirPlay receivers (each with its own ports and device ID offset).")), null);
 
         synchronize.CheckedChanged += delegate { UpdateEnabled(); };
         driftCorrection.CheckedChanged += delegate { UpdateEnabled(); };
@@ -1651,9 +1710,9 @@ internal sealed class AdvancedForm : Form
         UpdateEnabled();
 
         FlowLayoutPanel buttons = new FlowLayoutPanel { AutoSize = true, Anchor = AnchorStyles.Right, FlowDirection = FlowDirection.RightToLeft, Margin = new Padding(0) };
-        Button cancel = Theme.MakeButton("取消", false);
+        Button cancel = Theme.MakeButton(L.T("取消", "Cancel"), false);
         cancel.DialogResult = DialogResult.Cancel;
-        Button ok = Theme.MakeButton("确定", true);
+        Button ok = Theme.MakeButton(L.T("确定", "OK"), true);
         ok.Click += delegate { if (Apply()) DialogResult = DialogResult.OK; };
         cancel.Margin = new Padding(8, 0, 0, 0); ok.Margin = new Padding(8, 0, 0, 0);
         cancel.MinimumSize = ok.MinimumSize = new Size(88, 34);
@@ -1794,14 +1853,14 @@ internal sealed class AdvancedForm : Form
             }
         } catch (Exception) { }
         device.Items.Clear();
-        device.Items.Add(new NetworkChoice { Name = "", Label = "Windows 默认设备（跟随系统切换）" });
+        device.Items.Add(new NetworkChoice { Name = "", Label = L.T("Windows 默认设备（跟随系统切换）", "Windows default device (follows the system)") });
         int selected = 0;
         foreach (string name in names) {
             device.Items.Add(new NetworkChoice { Name = name, Label = name });
             if (name == selectName) selected = device.Items.Count - 1;
         }
         if (selected == 0 && !String.IsNullOrEmpty(selectName)) {
-            device.Items.Add(new NetworkChoice { Name = selectName, Label = selectName + "（当前不可用）" });
+            device.Items.Add(new NetworkChoice { Name = selectName, Label = selectName + L.T("（当前不可用）", " (not available)") });
             selected = device.Items.Count - 1;
         }
         device.SelectedIndex = selected;
@@ -1826,7 +1885,7 @@ internal sealed class AdvancedForm : Form
     private void LoadInterfaces(string selectName)
     {
         List<NetworkChoice> choices = new List<NetworkChoice>();
-        choices.Add(new NetworkChoice { Name = "", Label = "自动选择" });
+        choices.Add(new NetworkChoice { Name = "", Label = L.T("自动选择", "Automatic") });
         try {
             foreach (NetworkInterface nic in NetworkInterface.GetAllNetworkInterfaces()) {
                 if (nic.OperationalStatus != OperationalStatus.Up || nic.NetworkInterfaceType == NetworkInterfaceType.Loopback) continue;
@@ -1834,7 +1893,7 @@ internal sealed class AdvancedForm : Form
                     IPAddress ip = address.Address;
                     byte[] bytes = ip.GetAddressBytes();
                     if (ip.AddressFamily == AddressFamily.InterNetwork && !IPAddress.IsLoopback(ip) && !(bytes[0] == 169 && bytes[1] == 254)) {
-                        choices.Add(new NetworkChoice { Name = nic.Name, Label = nic.Name + "（" + ip + "）" });
+                        choices.Add(new NetworkChoice { Name = nic.Name, Label = nic.Name + L.T("（", " (") + ip + L.T("）", ")") });
                         break;
                     }
                 }
@@ -1842,7 +1901,7 @@ internal sealed class AdvancedForm : Form
         } catch (NetworkInformationException) { }
         bool found = false;
         foreach (NetworkChoice c in choices) if (c.Name == selectName) found = true;
-        if (!found && !String.IsNullOrEmpty(selectName)) choices.Add(new NetworkChoice { Name = selectName, Label = selectName + "（当前不可用）" });
+        if (!found && !String.IsNullOrEmpty(selectName)) choices.Add(new NetworkChoice { Name = selectName, Label = selectName + L.T("（当前不可用）", " (not available)") });
         network.Items.Clear();
         int selected = 0;
         for (int i = 0; i < choices.Count; i++) { network.Items.Add(choices[i]); if (choices[i].Name == selectName) selected = i; }
@@ -1853,11 +1912,11 @@ internal sealed class AdvancedForm : Form
     private bool Apply()
     {
         string error = null;
-        if (port.Value == eventPort.Value) error = "控制端口和事件端口不能相同。";
-        else if (udpPortBase.Value > 0 && udpPortBase.Value + udpPortRange.Value - 1 > 65535) error = "音频端口范围超出了 65535。";
-        else if (driftTolerance.Value >= resyncThreshold.Value) error = "漂移校正容差必须小于跳变阈值。";
+        if (port.Value == eventPort.Value) error = L.T("控制端口和事件端口不能相同。", "The control port and event port must be different.");
+        else if (udpPortBase.Value > 0 && udpPortBase.Value + udpPortRange.Value - 1 > 65535) error = L.T("音频端口范围超出了 65535。", "The audio port range goes beyond 65535.");
+        else if (driftTolerance.Value >= resyncThreshold.Value) error = L.T("漂移校正容差必须小于跳变阈值。", "The drift correction tolerance must be smaller than the resync threshold.");
         if (error != null) {
-            MessageBox.Show(this, error, "高级设置", MessageBoxButtons.OK, MessageBoxIcon.Warning);
+            MessageBox.Show(this, error, L.T("高级设置", "Advanced settings"), MessageBoxButtons.OK, MessageBoxIcon.Warning);
             return false;
         }
 
@@ -2034,19 +2093,19 @@ internal sealed class PlaybackMonitor
     public string ModeText()
     {
         switch (Mode) {
-            case "buffered": return "AirPlay 2 缓冲模式";
-            case "realtime": return "AirPlay 2 实时模式";
+            case "buffered": return L.T("AirPlay 2 缓冲模式", "AirPlay 2 buffered");
+            case "realtime": return L.T("AirPlay 2 实时模式", "AirPlay 2 realtime");
             case "classic": return "AirPlay 1";
-            default: return "未在接收音频";
+            default: return L.T("未在接收音频", "Not receiving audio");
         }
     }
 
     public string CodecText()
     {
         switch (Codec) {
-            case "aac": return "AAC（TCP 传输）";
-            case "alac": return "ALAC 无损（UDP 传输）";
-            case "l16": return "PCM 无压缩（UDP 传输）";
+            case "aac": return L.T("AAC（TCP 传输）", "AAC (over TCP)");
+            case "alac": return L.T("ALAC 无损（UDP 传输）", "ALAC lossless (over UDP)");
+            case "l16": return L.T("PCM 无压缩（UDP 传输）", "Uncompressed PCM (over UDP)");
             default: return "—";
         }
     }
@@ -2083,9 +2142,9 @@ internal sealed class PlaybackMonitor
         b.Append(" · ").Append(Codec == "l16" ? "PCM" : Codec.ToUpperInvariant());
         if (RateText().Length > 0) b.Append(" · ").Append(RateText());
         if (BitrateText().Length > 0) b.Append(" · ").Append(BitrateText());
-        if (!Synchronized) b.Append(" · 低延迟");
-        if (LatencyMs != 0) b.Append(" · 延迟 ").Append(LatencyMs).Append(" ms");
-        if (HasNetworkCounts) b.Append(" · 丢包 ").Append(LossPercent(TotalRx, TotalMiss).ToString("0.0", CultureInfo.InvariantCulture)).Append("%");
+        if (!Synchronized) b.Append(L.T(" · 低延迟", " · Low latency"));
+        if (LatencyMs != 0) b.Append(L.T(" · 延迟 ", " · Latency ")).Append(LatencyMs).Append(" ms");
+        if (HasNetworkCounts) b.Append(L.T(" · 丢包 ", " · Loss ")).Append(LossPercent(TotalRx, TotalMiss).ToString("0.0", CultureInfo.InvariantCulture)).Append("%");
         return b.ToString();
     }
 }
@@ -2103,7 +2162,7 @@ internal sealed class MonitorForm : Form
     {
         this.model = model;
         SuspendLayout();
-        Text = "播放监控";
+        Text = L.T("播放监控", "Playback monitor");
         Icon = icon;
         Font = Theme.Regular(10f);
         BackColor = Theme.Window;
@@ -2117,34 +2176,34 @@ internal sealed class MonitorForm : Form
         root.ColumnStyles.Add(new ColumnStyle(SizeType.Absolute, 460));
         Controls.Add(root);
 
-        root.Controls.Add(Title("播放模式"));
+        root.Controls.Add(Title(L.T("播放模式", "Playback mode")));
         TableLayoutPanel g = Section(root);
-        Row(g, "模式", mode);
-        Row(g, "编码", codec);
-        Row(g, "采样率", rate);
-        Row(g, "码率", bitrate);
-        Row(g, "播放方式", sync);
-        Row(g, "时钟同步", clock);
-        Row(g, "输出设备", output);
+        Row(g, L.T("模式", "Mode"), mode);
+        Row(g, L.T("编码", "Codec"), codec);
+        Row(g, L.T("采样率", "Sample rate"), rate);
+        Row(g, L.T("码率", "Bit rate"), bitrate);
+        Row(g, L.T("播放方式", "Timing"), sync);
+        Row(g, L.T("时钟同步", "Clock sync"), clock);
+        Row(g, L.T("输出设备", "Output device"), output);
 
-        root.Controls.Add(Title("延迟与同步"));
+        root.Controls.Add(Title(L.T("延迟与同步", "Latency and sync")));
         g = Section(root);
-        latencyCaption.Text = "发送端延迟";
+        latencyCaption.Text = L.T("发送端延迟", "Sender latency");
         Row(g, latencyCaption, latency);
-        Row(g, "输出延迟补偿", delay);
-        Row(g, "已缓冲音频", buffer);
-        Row(g, "同步误差", error);
-        Row(g, "漂移校正", correction);
-        Row(g, "重新对齐", resyncs);
+        Row(g, L.T("输出延迟补偿", "Output delay"), delay);
+        Row(g, L.T("已缓冲音频", "Buffered audio"), buffer);
+        Row(g, L.T("同步误差", "Sync error"), error);
+        Row(g, L.T("漂移校正", "Drift correction"), correction);
+        Row(g, L.T("重新对齐", "Resyncs"), resyncs);
 
-        root.Controls.Add(Title("网络"));
+        root.Controls.Add(Title(L.T("网络", "Network")));
         g = Section(root);
-        Row(g, "收包", packets);
-        Row(g, "丢包", loss);
-        Row(g, "重传", resend);
-        Row(g, "迟到/重复", late);
-        Row(g, "到达提前量", lead);
-        Row(g, "输出", underrun);
+        Row(g, L.T("收包", "Packets"), packets);
+        Row(g, L.T("丢包", "Lost"), loss);
+        Row(g, L.T("重传", "Resent"), resend);
+        Row(g, L.T("迟到/重复", "Late/duplicate"), late);
+        Row(g, L.T("到达提前量", "Arrival lead"), lead);
+        Row(g, L.T("输出", "Output"), underrun);
 
         footer.AutoSize = true;
         footer.ForeColor = Theme.SubText;
@@ -2175,7 +2234,7 @@ internal sealed class MonitorForm : Form
     {
         Card card = new Card { Margin = new Padding(0, 0, 0, 14) };
         TableLayoutPanel grid = new TableLayoutPanel { ColumnCount = 2, AutoSize = true, Dock = DockStyle.Top, BackColor = Theme.Card };
-        grid.ColumnStyles.Add(new ColumnStyle(SizeType.Absolute, 110));
+        grid.ColumnStyles.Add(new ColumnStyle(SizeType.Absolute, L.Zh ? 110 : 140));
         grid.ColumnStyles.Add(new ColumnStyle(SizeType.Percent, 100));
         card.Controls.Add(grid);
         root.Controls.Add(card);
@@ -2193,7 +2252,7 @@ internal sealed class MonitorForm : Form
         caption.ForeColor = Theme.SubText;
         caption.Margin = new Padding(0, 4, 8, 4);
         value.AutoSize = true;
-        value.MaximumSize = new Size(320, 0);
+        value.MaximumSize = new Size(L.Zh ? 320 : 290, 0);
         value.Margin = new Padding(0, 4, 0, 4);
         int row = grid.RowCount;
         grid.RowCount = row + 1;
@@ -2216,77 +2275,82 @@ internal sealed class MonitorForm : Form
         bool streaming = m.HaveData && m.Streaming;
         string none = "—";
 
-        Set(mode, m.HaveData ? m.ModeText() : "接收器未运行", streaming ? Theme.Accent : Theme.Grey);
+        Set(mode, m.HaveData ? m.ModeText() : L.T("接收器未运行", "Receiver not running"), streaming ? Theme.Accent : Theme.Grey);
         Set(codec, streaming ? m.CodecText() : none, Theme.Text);
         Set(rate, streaming && m.RateText().Length > 0 ? m.RateText() : none, Theme.Text);
         Set(bitrate, streaming && m.BitrateText().Length > 0 ? m.BitrateText() : none, Theme.Text);
-        Set(sync, m.Synchronized ? "按发送端时间同步" : "低延迟（不按时间同步）", Theme.Text);
+        Set(sync, m.Synchronized ? L.T("按发送端时间同步", "Synced to the sender's clock") : L.T("低延迟（不按时间同步）", "Low latency (not synced)"), Theme.Text);
         if (!streaming) Set(clock, none, Theme.Text);
-        else if (!m.Synchronized) Set(clock, "不需要", Theme.Grey);
-        else if (m.ClockLocked) Set(clock, m.Mode == "classic" ? "已锁定（NTP）" : "已锁定（PTP）", Theme.Green);
-        else Set(clock, "等待时钟同步…", Theme.Orange);
-        string device = m.OutputDevice.Length > 0 ? m.OutputDevice : "Windows 默认设备";
-        Set(output, m.OutputFormat.Length > 0 ? device + "，" + m.OutputFormat : device, Theme.Text);
+        else if (!m.Synchronized) Set(clock, L.T("不需要", "Not needed"), Theme.Grey);
+        else if (m.ClockLocked) Set(clock, m.Mode == "classic" ? L.T("已锁定（NTP）", "Locked (NTP)") : L.T("已锁定（PTP）", "Locked (PTP)"), Theme.Green);
+        else Set(clock, L.T("等待时钟同步…", "Waiting for clock sync…"), Theme.Orange);
+        string device = m.OutputDevice.Length > 0 ? m.OutputDevice : L.T("Windows 默认设备", "Windows default device");
+        Set(output, m.OutputFormat.Length > 0 ? device + L.T("，", ", ") + m.OutputFormat : device, Theme.Text);
 
-        latencyCaption.Text = m.Mode == "buffered" ? "调度提前量" : "发送端延迟";
+        latencyCaption.Text = m.Mode == "buffered" ? L.T("调度提前量", "Scheduling lead") : L.T("发送端延迟", "Sender latency");
         Set(latency, streaming && m.LatencyMs != 0 ? m.LatencyMs + " ms" : none, Theme.Text);
         Set(delay, (m.DelayMs > 0 ? "+" : "") + m.DelayMs + " ms", Theme.Text);
         Set(buffer, streaming ? FormatBuffer(m.BufferMs) : none, Theme.Text);
         if (streaming && m.HaveError) {
             double worst = Math.Max(Math.Abs(m.ErrMinMs), Math.Abs(m.ErrMaxMs));
-            Set(error, "平均 " + Ms(m.ErrMs) + "（" + Ms(m.ErrMinMs) + " ~ " + Ms(m.ErrMaxMs) + "），平滑后 " + Ms(m.SmoothedMs),
+            Set(error, L.T("平均 " + Ms(m.ErrMs) + "（" + Ms(m.ErrMinMs) + " ~ " + Ms(m.ErrMaxMs) + "），平滑后 " + Ms(m.SmoothedMs),
+                    "Average " + Ms(m.ErrMs) + " (" + Ms(m.ErrMinMs) + " to " + Ms(m.ErrMaxMs) + "), smoothed " + Ms(m.SmoothedMs)),
                 worst > 20 ? Theme.Orange : Theme.Text);
         } else {
-            Set(error, streaming && !m.Synchronized ? "不适用" : none, Theme.Text);
+            Set(error, streaming && !m.Synchronized ? L.T("不适用", "Not applicable") : none, Theme.Text);
         }
         if (streaming && m.Synchronized && m.Output > 0) {
             double ppm = (m.Removed - m.Added) * 1e6 / m.Output;
-            Set(correction, ppm.ToString("+0;-0;0", CultureInfo.InvariantCulture) + " ppm（本秒 +" + m.Removed + " / -" + m.Added + " 次）", Theme.Text);
+            Set(correction, ppm.ToString("+0;-0;0", CultureInfo.InvariantCulture) + L.T(" ppm（本秒 +" + m.Removed + " / -" + m.Added + " 次）", " ppm (this second +" + m.Removed + " / -" + m.Added + ")"), Theme.Text);
         } else if (streaming && !m.Synchronized) {
-            Set(correction, m.CatchUp > 0 ? "正在追赶积压：本秒删除 " + m.CatchUp + " 个采样" : "无积压", m.CatchUp > 0 ? Theme.Orange : Theme.Text);
+            Set(correction, m.CatchUp > 0 ? L.T("正在追赶积压：本秒删除 " + m.CatchUp + " 个采样", "Catching up: removed " + m.CatchUp + " samples this second") : L.T("无积压", "No backlog"), m.CatchUp > 0 ? Theme.Orange : Theme.Text);
         } else {
             Set(correction, none, Theme.Text);
         }
-        Set(resyncs, m.TotalResyncs + " 次" + (m.TotalDropped > 0 ? "，过时丢弃 " + m.TotalDropped + " 个采样" : ""),
+        Set(resyncs, m.TotalResyncs + L.T(" 次", "") + (m.TotalDropped > 0 ? L.T("，过时丢弃 " + m.TotalDropped + " 个采样", ", " + m.TotalDropped + " stale samples dropped") : ""),
             m.TotalResyncs > 0 ? Theme.Orange : Theme.Text);
 
         if (streaming && m.HasNetworkCounts) {
-            Set(packets, m.Rx + " 个/秒，累计 " + m.TotalRx + " 个", Theme.Text);
+            Set(packets, L.T(m.Rx + " 个/秒，累计 " + m.TotalRx + " 个", m.Rx + "/s, " + m.TotalRx + " total"), Theme.Text);
             double total = PlaybackMonitor.LossPercent(m.TotalRx, m.TotalMiss);
-            Set(loss, "本秒 " + m.Miss + " 个，累计 " + m.TotalMiss + " 个（" + total.ToString("0.00", CultureInfo.InvariantCulture) + "%）",
+            Set(loss, L.T("本秒 " + m.Miss + " 个，累计 " + m.TotalMiss + " 个（" + total.ToString("0.00", CultureInfo.InvariantCulture) + "%）",
+                    m.Miss + " this second, " + m.TotalMiss + " total (" + total.ToString("0.00", CultureInfo.InvariantCulture) + "%)"),
                 total >= 5 ? Theme.Red : total >= 0.5 || m.Miss > 0 ? Theme.Orange : Theme.Green);
-            Set(resend, "请求 " + m.TotalReq + " 个，已补回 " + m.TotalRec + " 个", Theme.Text);
-            Set(late, m.TotalLate + " 个" + (m.TotalFull > 0 ? "，输出队列满丢弃 " + m.TotalFull + " 个" : ""), m.TotalFull > 0 ? Theme.Orange : Theme.Text);
+            Set(resend, L.T("请求 " + m.TotalReq + " 个，已补回 " + m.TotalRec + " 个", m.TotalReq + " requested, " + m.TotalRec + " recovered"), Theme.Text);
+            Set(late, m.TotalLate + L.T(" 个", "") + (m.TotalFull > 0 ? L.T("，输出队列满丢弃 " + m.TotalFull + " 个", ", " + m.TotalFull + " dropped (output queue full)") : ""), m.TotalFull > 0 ? Theme.Orange : Theme.Text);
             Set(lead, m.HaveLead ? m.LeadMin + " ~ " + m.LeadMax + " ms" : none, m.HaveLead && m.LeadMin < 50 ? Theme.Orange : Theme.Text);
         } else {
-            string tcp = streaming ? "TCP 传输，不会丢包" : none;
+            string tcp = streaming ? L.T("TCP 传输，不会丢包", "Over TCP, no packet loss") : none;
             Set(packets, tcp, Theme.Text);
             Set(loss, tcp, streaming ? Theme.Green : Theme.Text);
             Set(resend, none, Theme.Text); Set(late, none, Theme.Text); Set(lead, none, Theme.Text);
         }
         if (streaming && m.Output > 0) {
             double silent = m.Silent * 100.0 / m.Output;
-            Set(underrun, silent < 0.05 ? "正常" : "本秒 " + silent.ToString("0.0", CultureInfo.InvariantCulture) + "% 为静音填充（无数据或等待播放时间）",
+            Set(underrun, silent < 0.05 ? L.T("正常", "Normal") : L.T("本秒 " + silent.ToString("0.0", CultureInfo.InvariantCulture) + "% 为静音填充（无数据或等待播放时间）",
+                    silent.ToString("0.0", CultureInfo.InvariantCulture) + "% silence this second (no data, or waiting for play time)"),
                 silent < 0.05 ? Theme.Green : Theme.Orange);
         } else {
-            Set(underrun, streaming ? "已暂停" : none, Theme.Text);
+            Set(underrun, streaming ? L.T("已暂停", "Paused") : none, Theme.Text);
         }
 
         TimeSpan span = DateTime.Now - m.Since;
-        footer.Text = (streaming ? "每秒刷新 · 累计数据自本次连接开始（" + FormatSpan(span) + "）" : "每秒刷新 · 有设备播放时显示数据");
+        footer.Text = streaming
+            ? L.T("每秒刷新 · 累计数据自本次连接开始（" + FormatSpan(span) + "）", "Updated every second · Totals since this connection started (" + FormatSpan(span) + ")")
+            : L.T("每秒刷新 · 有设备播放时显示数据", "Updated every second · Data appears while a device is playing");
     }
 
     private static string FormatBuffer(double ms)
     {
-        if (ms >= 1000) return (ms / 1000).ToString("0.0", CultureInfo.InvariantCulture) + " 秒";
+        if (ms >= 1000) return (ms / 1000).ToString("0.0", CultureInfo.InvariantCulture) + L.T(" 秒", " s");
         return Math.Round(ms) + " ms";
     }
 
     private static string FormatSpan(TimeSpan span)
     {
-        if (span.TotalHours >= 1) return (int)span.TotalHours + " 小时 " + span.Minutes + " 分";
-        if (span.TotalMinutes >= 1) return (int)span.TotalMinutes + " 分 " + span.Seconds + " 秒";
-        return span.Seconds + " 秒";
+        if (span.TotalHours >= 1) return (int)span.TotalHours + L.T(" 小时 ", " h ") + span.Minutes + L.T(" 分", " min");
+        if (span.TotalMinutes >= 1) return (int)span.TotalMinutes + L.T(" 分 ", " min ") + span.Seconds + L.T(" 秒", " s");
+        return span.Seconds + L.T(" 秒", " s");
     }
 }
 
@@ -2300,7 +2364,7 @@ internal sealed class LogForm : Form
 
     public LogForm(Icon icon)
     {
-        Text = "运行日志";
+        Text = L.T("运行日志", "Log");
         Icon = icon;
         Font = Theme.Regular(10f);
         BackColor = Theme.Window;
@@ -2316,11 +2380,11 @@ internal sealed class LogForm : Form
         box.BorderStyle = BorderStyle.None;
 
         FlowLayoutPanel bar = new FlowLayoutPanel { Dock = DockStyle.Bottom, AutoSize = true, Padding = new Padding(10, 8, 10, 8), WrapContents = false };
-        Button copy = Theme.MakeButton("复制全部", false);
+        Button copy = Theme.MakeButton(L.T("复制全部", "Copy all"), false);
         copy.Click += delegate { if (box.TextLength > 0) Clipboard.SetText(box.Text); };
-        Button clear = Theme.MakeButton("清空", false);
+        Button clear = Theme.MakeButton(L.T("清空", "Clear"), false);
         clear.Click += delegate { LogStore.Clear(); };
-        Button folder = Theme.MakeButton("打开日志文件夹", false);
+        Button folder = Theme.MakeButton(L.T("打开日志文件夹", "Open log folder"), false);
         folder.Click += delegate {
             try { Directory.CreateDirectory(LogStore.LogDirectory); Process.Start("explorer.exe", "\"" + LogStore.LogDirectory + "\""); } catch (Exception) { }
         };
