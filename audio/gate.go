@@ -5,7 +5,7 @@ import (
 	"sync/atomic"
 	"time"
 
-	"goplay2/globals"
+	"github.com/Max-Sum/AirPlay2Audio/globals"
 )
 
 // Several senders may be connected at once, but they share one Player.

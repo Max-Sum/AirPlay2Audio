@@ -9,9 +9,9 @@ import (
 	"testing"
 	"time"
 
-	"goplay2/globals"
-	"goplay2/ntp"
-	"goplay2/ptp"
+	"github.com/Max-Sum/AirPlay2Audio/globals"
+	"github.com/Max-Sum/AirPlay2Audio/ntp"
+	"github.com/Max-Sum/AirPlay2Audio/ptp"
 
 	alac "github.com/mycophonic/saprobe-alac"
 )

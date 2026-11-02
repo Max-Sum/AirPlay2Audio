@@ -1,10 +1,10 @@
 package handlers
 
 import (
-	"goplay2/audio"
-	"goplay2/globals"
-	"goplay2/homekit"
-	"goplay2/rtsp"
+	"github.com/Max-Sum/AirPlay2Audio/audio"
+	"github.com/Max-Sum/AirPlay2Audio/globals"
+	"github.com/Max-Sum/AirPlay2Audio/homekit"
+	"github.com/Max-Sum/AirPlay2Audio/rtsp"
 	"howett.net/plist"
 	"log"
 	"net"

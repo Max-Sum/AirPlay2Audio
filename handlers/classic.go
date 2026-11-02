@@ -9,8 +9,8 @@ import (
 	"strconv"
 	"strings"
 
-	"goplay2/audio"
-	"goplay2/rtsp"
+	"github.com/Max-Sum/AirPlay2Audio/audio"
+	"github.com/Max-Sum/AirPlay2Audio/rtsp"
 
 	alac "github.com/mycophonic/saprobe-alac"
 )

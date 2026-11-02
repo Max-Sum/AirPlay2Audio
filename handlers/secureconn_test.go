@@ -10,7 +10,7 @@ import (
 
 	"github.com/brutella/hc/crypto"
 	"github.com/brutella/hc/hap"
-	"goplay2/rtsp"
+	"github.com/Max-Sum/AirPlay2Audio/rtsp"
 )
 
 // readTwoRequests sends a request with a large body, as a sender does for

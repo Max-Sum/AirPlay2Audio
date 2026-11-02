@@ -4,8 +4,8 @@ import (
 	"testing"
 	"time"
 
-	"goplay2/globals"
-	"goplay2/ptp"
+	"github.com/Max-Sum/AirPlay2Audio/globals"
+	"github.com/Max-Sum/AirPlay2Audio/ptp"
 )
 
 func TestStandbyStreamLeavesPlayerAlone(t *testing.T) {

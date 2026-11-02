@@ -23,12 +23,12 @@ import (
 
 	goptp "github.com/albanseurat/go-ptp"
 	"github.com/brutella/hc/crypto/chacha20poly1305"
-	"goplay2/audio"
-	"goplay2/codec"
-	"goplay2/globals"
-	"goplay2/homekit"
-	"goplay2/ptp"
-	"goplay2/rtsp"
+	"github.com/Max-Sum/AirPlay2Audio/audio"
+	"github.com/Max-Sum/AirPlay2Audio/codec"
+	"github.com/Max-Sum/AirPlay2Audio/globals"
+	"github.com/Max-Sum/AirPlay2Audio/homekit"
+	"github.com/Max-Sum/AirPlay2Audio/ptp"
+	"github.com/Max-Sum/AirPlay2Audio/rtsp"
 	"howett.net/plist"
 )
 
