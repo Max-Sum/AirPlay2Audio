@@ -2,9 +2,9 @@ package audio
 
 import (
 	"encoding/binary"
-	"goplay2/codec"
-	"goplay2/globals"
-	"goplay2/ptp"
+	"github.com/Max-Sum/AirPlay2Audio/codec"
+	"github.com/Max-Sum/AirPlay2Audio/globals"
+	"github.com/Max-Sum/AirPlay2Audio/ptp"
 	"log"
 	"math"
 	"sync"

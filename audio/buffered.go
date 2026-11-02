@@ -8,7 +8,7 @@ import (
 	"sync/atomic"
 
 	alac "github.com/mycophonic/saprobe-alac"
-	"goplay2/codec"
+	"github.com/Max-Sum/AirPlay2Audio/codec"
 )
 
 // In AirPlay 2 buffered (type 103) audio, the RTP SSRC of every packet names

@@ -12,7 +12,7 @@ import (
 	"sync"
 	"time"
 
-	"goplay2/ptp"
+	"github.com/Max-Sum/AirPlay2Audio/ptp"
 )
 
 const (

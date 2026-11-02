@@ -7,8 +7,8 @@ import (
 	"time"
 
 	"github.com/pion/rtp"
-	"goplay2/codec"
-	"goplay2/globals"
+	"github.com/Max-Sum/AirPlay2Audio/codec"
+	"github.com/Max-Sum/AirPlay2Audio/globals"
 )
 
 type testStream struct{ calls chan string }

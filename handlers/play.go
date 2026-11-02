@@ -1,8 +1,8 @@
 package handlers
 
 import (
-	"goplay2/audio"
-	"goplay2/rtsp"
+	"github.com/Max-Sum/AirPlay2Audio/audio"
+	"github.com/Max-Sum/AirPlay2Audio/rtsp"
 	"howett.net/plist"
 	"log"
 	"math"

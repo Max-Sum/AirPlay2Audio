@@ -9,11 +9,11 @@ import (
 	"strings"
 	"time"
 
-	"goplay2/config"
-	"goplay2/event"
-	"goplay2/globals"
-	"goplay2/homekit"
-	"goplay2/rtsp"
+	"github.com/Max-Sum/AirPlay2Audio/config"
+	"github.com/Max-Sum/AirPlay2Audio/event"
+	"github.com/Max-Sum/AirPlay2Audio/globals"
+	"github.com/Max-Sum/AirPlay2Audio/homekit"
+	"github.com/Max-Sum/AirPlay2Audio/rtsp"
 )
 
 // Several senders can stay connected at the same time. One of them, the

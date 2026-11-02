@@ -15,16 +15,16 @@ import (
 	"time"
 
 	"github.com/grandcat/zeroconf"
-	"goplay2/audio"
-	"goplay2/codec"
-	"goplay2/config"
-	"goplay2/event"
-	"goplay2/globals"
-	"goplay2/handlers"
-	"goplay2/homekit"
-	"goplay2/netutil"
-	"goplay2/ptp"
-	"goplay2/rtsp"
+	"github.com/Max-Sum/AirPlay2Audio/audio"
+	"github.com/Max-Sum/AirPlay2Audio/codec"
+	"github.com/Max-Sum/AirPlay2Audio/config"
+	"github.com/Max-Sum/AirPlay2Audio/event"
+	"github.com/Max-Sum/AirPlay2Audio/globals"
+	"github.com/Max-Sum/AirPlay2Audio/handlers"
+	"github.com/Max-Sum/AirPlay2Audio/homekit"
+	"github.com/Max-Sum/AirPlay2Audio/netutil"
+	"github.com/Max-Sum/AirPlay2Audio/ptp"
+	"github.com/Max-Sum/AirPlay2Audio/rtsp"
 )
 
 func main() {

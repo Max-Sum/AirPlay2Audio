@@ -14,7 +14,7 @@ import (
 
 	"github.com/brutella/hc/crypto/chacha20poly1305"
 	"github.com/brutella/hc/crypto/hkdf"
-	"goplay2/globals"
+	"github.com/Max-Sum/AirPlay2Audio/globals"
 	"howett.net/plist"
 )
 

@@ -24,8 +24,8 @@ import (
 	"strings"
 	"time"
 
-	"goplay2/handlers"
-	"goplay2/ntp"
+	"github.com/Max-Sum/AirPlay2Audio/handlers"
+	"github.com/Max-Sum/AirPlay2Audio/ntp"
 )
 
 type client struct {

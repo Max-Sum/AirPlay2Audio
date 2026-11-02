@@ -9,8 +9,8 @@ import (
 	"net"
 	"time"
 
-	"goplay2/netutil"
-	"goplay2/ntp"
+	"github.com/Max-Sum/AirPlay2Audio/netutil"
+	"github.com/Max-Sum/AirPlay2Audio/ntp"
 
 	alac "github.com/mycophonic/saprobe-alac"
 	"github.com/pion/rtp"

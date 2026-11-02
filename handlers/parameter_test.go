@@ -1,10 +1,10 @@
 package handlers
 
 import (
-	"goplay2/audio"
-	"goplay2/config"
-	"goplay2/globals"
-	"goplay2/rtsp"
+	"github.com/Max-Sum/AirPlay2Audio/audio"
+	"github.com/Max-Sum/AirPlay2Audio/config"
+	"github.com/Max-Sum/AirPlay2Audio/globals"
+	"github.com/Max-Sum/AirPlay2Audio/rtsp"
 	"testing"
 )
 

@@ -1,4 +1,4 @@
-module goplay2
+module github.com/Max-Sum/AirPlay2Audio
 
 go 1.26.0
 
