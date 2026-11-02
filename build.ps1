@@ -2,7 +2,9 @@ param(
     [string] $GoExe = "",
     [ValidateSet('', 'amd64', 'arm64')]
     [string] $Arch = "",
-    [switch] $Test
+    [switch] $Test,
+    # Skip slow real-time tests (go test -short), as CI does.
+    [switch] $Short
 )
 
 $ErrorActionPreference = 'Stop'
@@ -25,7 +27,9 @@ try {
     $env:GOARCH = $Arch
     if ($Test -and $Arch -ne $hostArch) { Write-Warning "Skipping tests: cannot run $Arch binaries on this $hostArch host." }
     elseif ($Test) {
-        & $GoExe test ./...
+        $testArgs = @('test')
+        if ($Short) { $testArgs += '-short' }
+        & $GoExe @testArgs ./...
         if ($LASTEXITCODE -ne 0) { throw 'Go tests failed.' }
     }
     & $GoExe build -o AirPlay2Engine.exe .
