@@ -14,8 +14,8 @@ import (
 	"time"
 
 	"github.com/brutella/hc/crypto/chacha20poly1305"
-	"goplay2/globals"
-	"goplay2/ptp"
+	"github.com/Max-Sum/AirPlay2Audio/globals"
+	"github.com/Max-Sum/AirPlay2Audio/ptp"
 )
 
 // Exercise actual AAC-LC decoding after authenticating an AirPlay type-103

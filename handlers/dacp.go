@@ -3,9 +3,9 @@ package handlers
 import (
 	"log"
 
-	"goplay2/dacp"
-	"goplay2/event"
-	"goplay2/rtsp"
+	"github.com/Max-Sum/AirPlay2Audio/dacp"
+	"github.com/Max-Sum/AirPlay2Audio/event"
+	"github.com/Max-Sum/AirPlay2Audio/rtsp"
 )
 
 // noteRemote keeps the DACP remote control a sender names in its request

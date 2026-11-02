@@ -6,7 +6,7 @@ import (
 	"testing"
 	"time"
 
-	"goplay2/ptp"
+	"github.com/Max-Sum/AirPlay2Audio/ptp"
 )
 
 // The sender clock runs ppm faster than the sound card. Without correction

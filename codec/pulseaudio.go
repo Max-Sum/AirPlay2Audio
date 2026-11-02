@@ -5,7 +5,7 @@ package codec
 import (
 	"github.com/jfreymuth/pulse"
 	"github.com/jfreymuth/pulse/proto"
-	"goplay2/config"
+	"github.com/Max-Sum/AirPlay2Audio/config"
 	"log"
 	"math"
 	"time"

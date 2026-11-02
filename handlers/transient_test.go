@@ -8,8 +8,8 @@ import (
 
 	"github.com/brutella/hc/hap/pair"
 	"github.com/brutella/hc/util"
-	"goplay2/homekit"
-	"goplay2/rtsp"
+	"github.com/Max-Sum/AirPlay2Audio/homekit"
+	"github.com/Max-Sum/AirPlay2Audio/rtsp"
 )
 
 func TestTransientPairSetup(t *testing.T) {

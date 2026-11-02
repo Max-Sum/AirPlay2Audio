@@ -3,7 +3,7 @@ package rtsp
 import (
 	"bufio"
 	"errors"
-	"goplay2/globals"
+	"github.com/Max-Sum/AirPlay2Audio/globals"
 	"io"
 	"net"
 )

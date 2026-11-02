@@ -5,9 +5,9 @@ import (
 	"testing"
 	"time"
 
-	"goplay2/audio"
-	"goplay2/ptp"
-	"goplay2/rtsp"
+	"github.com/Max-Sum/AirPlay2Audio/audio"
+	"github.com/Max-Sum/AirPlay2Audio/ptp"
+	"github.com/Max-Sum/AirPlay2Audio/rtsp"
 )
 
 // tcpPair returns the receiver side of a loopback TCP connection and the

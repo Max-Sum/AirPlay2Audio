@@ -4,9 +4,9 @@ import (
 	"bufio"
 	"bytes"
 	"fmt"
-	"goplay2/config"
-	"goplay2/globals"
-	"goplay2/rtsp"
+	"github.com/Max-Sum/AirPlay2Audio/config"
+	"github.com/Max-Sum/AirPlay2Audio/globals"
+	"github.com/Max-Sum/AirPlay2Audio/rtsp"
 	"log"
 	"strings"
 )

@@ -4,8 +4,8 @@ import (
 	"encoding/hex"
 	"fmt"
 
-	"goplay2/globals"
-	"goplay2/homekit"
+	"github.com/Max-Sum/AirPlay2Audio/globals"
+	"github.com/Max-Sum/AirPlay2Audio/homekit"
 )
 
 // airplayDevice returns the advertised feature bits. They follow

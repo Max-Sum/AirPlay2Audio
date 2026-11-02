@@ -10,12 +10,12 @@ import (
 	"time"
 
 	"github.com/brutella/hc/hap/pair"
-	"goplay2/audio"
-	"goplay2/event"
-	"goplay2/globals"
-	"goplay2/homekit"
-	"goplay2/pairing"
-	"goplay2/rtsp"
+	"github.com/Max-Sum/AirPlay2Audio/audio"
+	"github.com/Max-Sum/AirPlay2Audio/event"
+	"github.com/Max-Sum/AirPlay2Audio/globals"
+	"github.com/Max-Sum/AirPlay2Audio/homekit"
+	"github.com/Max-Sum/AirPlay2Audio/pairing"
+	"github.com/Max-Sum/AirPlay2Audio/rtsp"
 	"howett.net/plist"
 )
 

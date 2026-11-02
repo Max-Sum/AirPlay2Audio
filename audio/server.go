@@ -3,8 +3,8 @@ package audio
 import (
 	"encoding/binary"
 	"errors"
-	"goplay2/globals"
-	"goplay2/netutil"
+	"github.com/Max-Sum/AirPlay2Audio/globals"
+	"github.com/Max-Sum/AirPlay2Audio/netutil"
 	"io"
 	"log"
 	"net"
