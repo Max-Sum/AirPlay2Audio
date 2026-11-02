@@ -55,12 +55,28 @@ func TestEncryptedBufferedAACDecode(t *testing.T) {
 			t.Fatal(err)
 		}
 		packet := append(append(append(header, ciphertext...), tag[:]...), nonce...)
+		if sequence == 0 {
+			tampered := append([]byte(nil), packet...)
+			tampered[len(tampered)-9] ^= 0x01
+			if _, err := NewFrame(decoder, key, tampered); err == nil {
+				t.Fatal("modified authentication tag was accepted")
+			}
+		}
 		frame, err := NewFrame(decoder, key, packet)
 		if err != nil {
 			t.Fatalf("frame %d: %v", sequence, err)
 		}
-		if frame == nil || len(frame.Data()) != 4096 || frame.Timestamp != uint32(sequence*1024) {
-			t.Fatalf("invalid decoded frame %d", sequence)
+		if frame == nil {
+			// The decoder outputs each unit one unit late.
+			if sequence > 0 {
+				t.Fatalf("no audio for packet %d", sequence)
+			}
+			continue
+		}
+		// Decoded audio keeps the timestamp of the packet it came from.
+		if len(frame.Data()) != 4096 || frame.Timestamp != uint32(decoded*1024) {
+			t.Fatalf("packet %d: invalid decoded frame (%d bytes, timestamp %d, want %d)",
+				sequence, len(frame.Data()), frame.Timestamp, decoded*1024)
 		}
 		for _, b := range frame.Data() {
 			if b != 0 {
@@ -69,12 +85,6 @@ func TestEncryptedBufferedAACDecode(t *testing.T) {
 			}
 		}
 		decoded++
-		if sequence == 0 {
-			packet[len(packet)-9] ^= 0x01
-			if _, err := NewFrame(decoder, key, packet); err == nil {
-				t.Fatal("modified authentication tag was accepted")
-			}
-		}
 	}
 	if decoded < 10 || nonzero < 5 {
 		t.Fatalf("decoded %d packets, %d non-silent", decoded, nonzero)
@@ -136,27 +146,32 @@ func TestNextStreamGetsANewDecoder(t *testing.T) {
 		t.Fatal(err)
 	}
 	defer file.Close()
-	var size uint16
-	if err = binary.Read(file, binary.BigEndian, &size); err != nil {
-		t.Fatal(err)
-	}
-	encoded := make([]byte, size)
-	if _, err = io.ReadFull(file, encoded); err != nil {
-		t.Fatal(err)
-	}
-	header := make([]byte, 12)
-	header[0] = 0x80
-	nonce := make([]byte, 8)
-	ciphertext, tag, err := chacha20poly1305.EncryptAndSeal(key, nonce, encoded, header[4:12])
-	if err != nil {
-		t.Fatal(err)
-	}
-	packet := append(append(append(header, ciphertext...), tag[:]...), nonce...)
-	if err = binary.Write(second, binary.BigEndian, uint16(len(packet)+2)); err != nil {
-		t.Fatal(err)
-	}
-	if _, err = second.Write(packet); err != nil {
-		t.Fatal(err)
+	// Send two packets: the decoder outputs each unit one unit late.
+	for sequence := 0; sequence < 2; sequence++ {
+		var size uint16
+		if err = binary.Read(file, binary.BigEndian, &size); err != nil {
+			t.Fatal(err)
+		}
+		encoded := make([]byte, size)
+		if _, err = io.ReadFull(file, encoded); err != nil {
+			t.Fatal(err)
+		}
+		header := make([]byte, 12)
+		header[0], header[3] = 0x80, byte(sequence)
+		binary.BigEndian.PutUint32(header[4:8], uint32(sequence*1024))
+		nonce := make([]byte, 8)
+		binary.BigEndian.PutUint64(nonce, uint64(sequence))
+		ciphertext, tag, err := chacha20poly1305.EncryptAndSeal(key, nonce, encoded, header[4:12])
+		if err != nil {
+			t.Fatal(err)
+		}
+		packet := append(append(append(header, ciphertext...), tag[:]...), nonce...)
+		if err = binary.Write(second, binary.BigEndian, uint16(len(packet)+2)); err != nil {
+			t.Fatal(err)
+		}
+		if _, err = second.Write(packet); err != nil {
+			t.Fatal(err)
+		}
 	}
 	deadline := time.Now().Add(2 * time.Second)
 	for time.Now().Before(deadline) {

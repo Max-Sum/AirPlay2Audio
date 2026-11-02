@@ -84,10 +84,13 @@ func TestToStereo16Rounds24Bit(t *testing.T) {
 }
 
 func TestSurroundFormatsAreAdvertisedAndConfigured(t *testing.T) {
-	for _, format := range []uint64{1 << 39, 1 << 40, 1 << 21, 1 << 22, 1 << 23} {
+	for _, format := range []uint64{1 << 39, 1 << 21, 1 << 22, 1 << 23} {
 		if !SupportedBufferedFormat(format) {
 			t.Fatalf("format %#x not supported", format)
 		}
+	}
+	if SupportedBufferedFormat(1<<40) != decodes71 {
+		t.Fatalf("7.1 advertised: %v, decodable: %v", !decodes71, decodes71)
 	}
 	if SupportedBufferedFormat(1<<22|1<<23) || SupportedBufferedFormat(1<<24) {
 		t.Fatal("a combined or unknown format bit accepted")

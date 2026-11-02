@@ -71,11 +71,12 @@ const (
 
 // RealtimeFormats and BufferedFormats are the formats advertised in /info,
 // as shairport-sync advertises them: realtime ALAC 44.1 kHz; buffered AAC at
-// 44.1 and 48 kHz, lossless ALAC 48 kHz 24-bit, and AAC 5.1 and 7.1.
+// 44.1 and 48 kHz, lossless ALAC 48 kHz 24-bit, and AAC 5.1 and, where the
+// AAC decoder supports it, 7.1.
 const (
 	RealtimeFormats uint64 = audioFormatALAC44100S16
 	BufferedFormats uint64 = audioFormatAAC44100 | audioFormatAAC48000 | audioFormatALAC48000S24 |
-		audioFormatAAC48000x51 | audioFormatAAC48000x71
+		audioFormatAAC48000x51 | audioFormat71
 )
 
 // formatForAudioFormat returns the encoding named by a SETUP audioFormat
@@ -181,6 +182,12 @@ type bufferedDecoder struct {
 	haveNext  bool
 	reported  map[uint32]bool
 
+	// pending holds the packets whose AAC audio the decoder has not output
+	// yet, oldest first. The Windows decoder outputs each access unit one
+	// unit late, so decoded audio takes the timestamp of the packet it came
+	// from rather than that of the packet just given to the decoder.
+	pending []TcpPacket
+
 	// AAC muting, as shairport-sync: the first block of each play sequence
 	// and the first block after a timestamp gap are silenced.
 	restart     *atomic.Uint64 // the stream's restart counter; nil in tests
@@ -201,6 +208,10 @@ func (d *bufferedDecoder) mute(timestamp uint32, samples int) bool {
 	d.expectTS, d.haveExpect = timestamp+uint32(samples), true
 	return gap
 }
+
+// maxPendingAAC bounds pending if the decoder holds back more audio than
+// expected.
+const maxPendingAAC = 4
 
 func newBufferedDecoder(fallback bufferedFormat, mapper *rtpMapper) *bufferedDecoder {
 	return &bufferedDecoder{fallback: fallback, mapper: mapper, reported: map[uint32]bool{}}
@@ -227,7 +238,7 @@ func (d *bufferedDecoder) formatFor(ssrc uint32) bufferedFormat {
 
 func (d *bufferedDecoder) switchTo(f bufferedFormat) error {
 	d.Close()
-	d.alac, d.resampler, d.haveNext, d.haveExpect = nil, nil, false, false
+	d.alac, d.resampler, d.haveNext, d.haveExpect, d.pending = nil, nil, false, false, nil
 	if f.alac {
 		decoder, err := alac.NewPacketDecoder(alac.PacketConfig{
 			FrameLength: 352, BitDepth: f.bits, NumChannels: 2,
@@ -270,7 +281,7 @@ func (d *bufferedDecoder) switchTo(f bufferedFormat) error {
 // packet holds no audio that can be played.
 func (d *bufferedDecoder) decode(packet TcpPacket, payload []byte) (*PCMFrame, error) {
 	f := d.formatFor(packet.SSRC)
-	if f.channels != 2 && f.alac {
+	if f.channels != 2 && f.alac || f.channels == 8 && !decodes71 {
 		if !d.reported[packet.SSRC] {
 			d.reported[packet.SSRC] = true
 			log.Printf("AUDIO buffered encoding %s is not supported; its packets are skipped", f.name)
@@ -290,7 +301,17 @@ func (d *bufferedDecoder) decode(packet TcpPacket, payload []byte) (*PCMFrame, e
 	if f.alac {
 		pcm, err = d.alac.DecodePacket(payload)
 	} else {
+		d.pending = append(d.pending, packet)
 		pcm, err = d.aac.Decode(payload)
+		if err != nil {
+			// The decoder was flushed: audio it held back is gone.
+			d.pending = nil
+		} else if len(pcm) > 0 {
+			packet = d.pending[0]
+			d.pending = d.pending[1:]
+		} else if len(d.pending) > maxPendingAAC {
+			d.pending = d.pending[1:]
+		}
 	}
 	if err != nil || len(pcm) == 0 {
 		return nil, err
