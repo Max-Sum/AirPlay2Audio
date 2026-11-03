@@ -171,6 +171,8 @@ func parseFlags() (*options, error) {
 	flag.IntVar(&codec.Output.Bits, "output-bits", 16, "output sample size: 16, 24 or 32")
 	flag.IntVar(&codec.Output.Rate, "output-rate", 44100, "output sample rate: 44100, 48000, 88200, 96000, 176400 or 192000")
 	flag.StringVar(&codec.Output.Dither, "dither", "auto", "dither: auto (16-bit output with volume or rate conversion), on or off")
+	flag.StringVar(&codec.Output.API, "output-api", "wasapi", "Windows output: wasapi (lower delay; falls back to waveout if it cannot open) or waveout")
+	flag.IntVar(&codec.Output.BufferMs, "output-buffer", codec.DefaultBufferMs, "milliseconds of audio WASAPI keeps queued at the device; lower is less delay, too low can crackle on a busy computer")
 	flag.Float64Var(&o.volumeRange, "volume-range", audio.DefaultVolumeRange, "attenuation in dB at the sender's lowest volume step (shairport-sync's volume_range_db)")
 
 	// Synchronization.

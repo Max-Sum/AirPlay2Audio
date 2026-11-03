@@ -40,6 +40,9 @@ func (c *converter) fill(out []byte, frames int, gain float64, pull func([]int16
 	mix := c.mix[:frames*2]
 	if c.resampler == nil {
 		// One source block per output block; sizes match at 44.1 kHz.
+		if cap(c.source) < frames*2 {
+			c.source = make([]int16, frames*2)
+		}
 		src := c.source[:frames*2]
 		clear(src)
 		pull(src)

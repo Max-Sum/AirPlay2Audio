@@ -19,10 +19,21 @@ type OutputConfig struct {
 	// Dither is "auto" (only for 16-bit output whose samples were scaled or
 	// resampled), "on" or "off".
 	Dither string
+	// API is the Windows output API: "wasapi" (default; falls back to
+	// waveOut when it cannot be opened) or "waveout".
+	API string
+	// BufferMs is how much audio WASAPI keeps queued at the device, in
+	// milliseconds; 0 uses DefaultBufferMs. Less is less delay, but too
+	// little lets a busy computer run the device dry.
+	BufferMs int
 }
 
+// DefaultBufferMs is the WASAPI queue kept by default: two periods of the
+// usual 10 ms Windows audio engine period.
+const DefaultBufferMs = 20
+
 // Output is read when a stream opens its device.
-var Output = OutputConfig{Bits: 16, Rate: SourceRate, Dither: "auto"}
+var Output = OutputConfig{Bits: 16, Rate: SourceRate, Dither: "auto", API: "wasapi", BufferMs: DefaultBufferMs}
 
 func (c OutputConfig) Validate() error {
 	switch c.Bits {
@@ -39,6 +50,14 @@ func (c OutputConfig) Validate() error {
 	case "auto", "on", "off":
 	default:
 		return fmt.Errorf("dither must be auto, on or off")
+	}
+	switch strings.ToLower(c.API) {
+	case "", "wasapi", "waveout":
+	default:
+		return fmt.Errorf("output API must be wasapi or waveout")
+	}
+	if c.BufferMs != 0 && (c.BufferMs < 5 || c.BufferMs > 500) {
+		return fmt.Errorf("output buffer must be between 5 and 500 ms")
 	}
 	return nil
 }
@@ -75,6 +94,16 @@ func matchDevice(spec string, devices []Device) (Device, error) {
 		return Device{}, fmt.Errorf("no output device matches %q", spec)
 	case 1:
 		return found[0], nil
+	}
+	// A name saved from waveOut is the first 31 characters of the full name.
+	var prefixed []Device
+	for _, d := range found {
+		if strings.HasPrefix(strings.ToLower(d.Name), strings.ToLower(spec)) {
+			prefixed = append(prefixed, d)
+		}
+	}
+	if len(prefixed) == 1 {
+		return prefixed[0], nil
 	}
 	return Device{}, fmt.Errorf("%d output devices match %q; use the index", len(found), spec)
 }
