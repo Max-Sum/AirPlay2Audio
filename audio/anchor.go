@@ -20,9 +20,9 @@ const (
 	AnchorLowLatency
 )
 
-// realtimeAnchorLead is the 250 ms (11025 sample) allowance for network
-// jitter which shairport-sync subtracts from the anchor frame.
-const realtimeAnchorLead = 11025
+// realtimeAnchorLead is the 250 ms allowance for network jitter which
+// shairport-sync subtracts from the anchor frame (11025 samples at 44.1 kHz).
+func realtimeAnchorLead(rate int) uint32 { return uint32(rate / 4) }
 
 func ParseRealtimeAnchor(value string) (RealtimeAnchor, error) {
 	switch value {
@@ -38,14 +38,14 @@ func ParseRealtimeAnchor(value string) (RealtimeAnchor, error) {
 func (p *Player) SetRealtimeAnchor(mode RealtimeAnchor) { p.realtimeAnchor = mode }
 
 // realtimeAnchorStamp returns the RTP frame to play at the anchor packet's
-// network time.
-func realtimeAnchorStamp(frame1, frame2 uint32, mode RealtimeAnchor) uint32 {
+// network time. rate is the stream's sample rate.
+func realtimeAnchorStamp(frame1, frame2 uint32, mode RealtimeAnchor, rate int) uint32 {
 	reference := frame1
 	if mode == AnchorLowLatency {
 		// Ignore an implausible latency rather than jump by it.
-		if latency := int32(frame2 - frame1); latency > 0 && latency < cdRate*4 {
+		if latency := int32(frame2 - frame1); latency > 0 && int(latency) < rate*4 {
 			reference = frame2
 		}
 	}
-	return reference - realtimeAnchorLead
+	return reference - realtimeAnchorLead(rate)
 }

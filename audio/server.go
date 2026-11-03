@@ -86,7 +86,7 @@ func listenPair() (*net.UDPConn, *net.UDPConn, error) {
 
 // startUDP replaces the current connection with a UDP one. finish ends it,
 // once, if it is still current.
-func (s *Server) startUDP(data, control *net.UDPConn, timing io.Closer, samplesPerPacket uint32, closed string) (chan struct{}, func()) {
+func (s *Server) startUDP(data, control *net.UDPConn, timing io.Closer, samplesPerPacket uint32, rate int, closed string) (chan struct{}, func()) {
 	s.mu.Lock()
 	s.generation++
 	generation := s.generation
@@ -103,7 +103,7 @@ func (s *Server) startUDP(data, control *net.UDPConn, timing io.Closer, samplesP
 	if !s.player.synchronized {
 		// UDP cannot apply TCP backpressure. Reserve up to about one second
 		// of PCM for bursts, without forcing this delay when the queue is empty.
-		frames := int((uint64(cdRate) + uint64(samplesPerPacket) - 1) / uint64(samplesPerPacket))
+		frames := int((uint64(rate) + uint64(samplesPerPacket) - 1) / uint64(samplesPerPacket))
 		if frames < 2 {
 			frames = 2
 		}
@@ -115,7 +115,7 @@ func (s *Server) startUDP(data, control *net.UDPConn, timing io.Closer, samplesP
 			s.player.ringBuffer.ResetCapacity(frames)
 			s.player.SetLowLatencyCatchUp(true)
 		}
-		log.Printf("AUDIO realtime burst capacity=%d packets (up to approximately %d ms at negotiated packet size)", frames, uint64(frames)*uint64(samplesPerPacket)*1000/uint64(cdRate))
+		log.Printf("AUDIO realtime burst capacity=%d packets (up to approximately %d ms at negotiated packet size)", frames, uint64(frames)*uint64(samplesPerPacket)*1000/uint64(rate))
 	}
 	s.dataSocket, s.controlSocket, s.timing = data, control, timing
 	s.gate.classic = timing != nil

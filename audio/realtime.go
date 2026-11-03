@@ -16,12 +16,12 @@ import (
 	"github.com/pion/rtp"
 )
 
-// SetupRealtime handles the AP2 type-96 44.1 kHz / 16-bit stereo ALAC path.
+// SetupRealtime handles the AP2 type-96 stereo ALAC path in the given format.
 // The normal buffered type-103 path stays separate and continues to use TCP.
-func (s *Server) SetupRealtime(sharedKey []byte, samplesPerPacket uint32) (int, int, error) {
+func (s *Server) SetupRealtime(sharedKey []byte, samplesPerPacket uint32, format RealtimeFormat) (int, int, error) {
 	decoder, err := alac.NewPacketDecoder(alac.PacketConfig{
-		FrameLength: samplesPerPacket, BitDepth: 16, NumChannels: 2,
-		PB: 40, MB: 10, KB: 14, MaxRun: 255, SampleRate: 44100,
+		FrameLength: samplesPerPacket, BitDepth: uint8(format.Bits), NumChannels: 2,
+		PB: 40, MB: 10, KB: 14, MaxRun: 255, SampleRate: uint32(format.Rate),
 	})
 	if err != nil {
 		return 0, 0, fmt.Errorf("initialize ALAC decoder: %w", err)
@@ -31,18 +31,18 @@ func (s *Server) SetupRealtime(sharedKey []byte, samplesPerPacket uint32) (int, 
 		return 0, 0, err
 	}
 	key := append([]byte(nil), sharedKey...)
-	done, finish := s.startUDP(data, control, nil, samplesPerPacket, "AUDIO realtime connection closed")
+	done, finish := s.startUDP(data, control, nil, samplesPerPacket, format.Rate, "AUDIO realtime connection closed")
 	s.describe("realtime", "alac")
-	s.noteFormat(44100, 16)
+	s.noteFormat(format.Rate, format.Bits)
 	link := &realtimeControlLink{conn: control, resent: make(chan realtimeDatagram, 64)}
-	decode := func(raw []byte) (*PCMFrame, error) { return decodeRealtimePacket(decoder, key, raw) }
+	decode := func(raw []byte) (*PCMFrame, error) { return decodeRealtimePacket(decoder, key, raw, format) }
 	go s.receiveRealtime(data, decode, link, done, finish)
-	go s.receiveRealtimeControl(control, link, done, finish)
-	log.Print("AUDIO realtime ALAC ready")
+	go s.receiveRealtimeControl(control, link, format.Rate, done, finish)
+	log.Printf("AUDIO realtime ALAC ready: %d Hz %d-bit", format.Rate, format.Bits)
 	return data.LocalAddr().(*net.UDPAddr).Port, control.LocalAddr().(*net.UDPAddr).Port, nil
 }
 
-func decodeRealtimePacket(decoder *alac.PacketDecoder, key, raw []byte) (*PCMFrame, error) {
+func decodeRealtimePacket(decoder *alac.PacketDecoder, key, raw []byte, format RealtimeFormat) (*PCMFrame, error) {
 	if len(raw) < 36 {
 		return nil, fmt.Errorf("short realtime audio packet")
 	}
@@ -67,7 +67,11 @@ func decodeRealtimePacket(decoder *alac.PacketDecoder, key, raw []byte) (*PCMFra
 	if err != nil {
 		return nil, err
 	}
-	return &PCMFrame{TcpPacket: TcpPacket{Packet: packet, SequenceNumber: uint32(packet.SequenceNumber)}, samples: pcm16(pcm), format: cdFormat}, nil
+	samples := pcm16(pcm)
+	if format.Bits == 24 {
+		samples = pcm24(pcm)
+	}
+	return &PCMFrame{TcpPacket: TcpPacket{Packet: packet, SequenceNumber: uint32(packet.SequenceNumber)}, samples: samples, format: format.codec()}, nil
 }
 
 // Resend timing. In synchronized mode packets arrive a few hundred
@@ -327,7 +331,7 @@ func (s *Server) forgetAnchor() bool {
 	return had
 }
 
-func (s *Server) receiveRealtimeControl(conn *net.UDPConn, link *realtimeControlLink, done <-chan struct{}, finish func()) {
+func (s *Server) receiveRealtimeControl(conn *net.UDPConn, link *realtimeControlLink, rate int, done <-chan struct{}, finish func()) {
 	defer finish()
 	buffer := make([]byte, 4096)
 	announced := false
@@ -376,7 +380,7 @@ func (s *Server) receiveRealtimeControl(conn *net.UDPConn, link *realtimeControl
 		// PTP realtime anchor: frame_1 at byte 4, network nanoseconds at byte
 		// 8, frame_2 at byte 16; see realtimeAnchorStamp for the modes.
 		if n >= 28 && buffer[1] == 0xd7 {
-			stamp := realtimeAnchorStamp(binary.BigEndian.Uint32(buffer[4:8]), binary.BigEndian.Uint32(buffer[16:20]), s.player.realtimeAnchor)
+			stamp := realtimeAnchorStamp(binary.BigEndian.Uint32(buffer[4:8]), binary.BigEndian.Uint32(buffer[16:20]), s.player.realtimeAnchor, rate)
 			networkTime := int64(binary.BigEndian.Uint64(buffer[8:16]))
 			// Bytes 20..28 name the PTP clock the network time is on.
 			clockID := binary.BigEndian.Uint64(buffer[20:28])
@@ -388,8 +392,8 @@ func (s *Server) receiveRealtimeControl(conn *net.UDPConn, link *realtimeControl
 				// Bytes 16..20 hold the frame the network time refers to; the
 				// difference is the sender's stream latency (normally 77175).
 				latency := int32(binary.BigEndian.Uint32(buffer[16:20]) - binary.BigEndian.Uint32(buffer[4:8]))
-				s.noteLatency(time.Duration(latency) * time.Second / time.Duration(cdRate))
-				log.Printf("AUDIO realtime PTP anchor received; stream latency=%d samples (%d ms) clock=%016x", latency, int64(latency)*1000/cdRate, clockID)
+				s.noteLatency(time.Duration(latency) * time.Second / time.Duration(rate))
+				log.Printf("AUDIO realtime PTP anchor received; stream latency=%d samples (%d ms) clock=%016x", latency, int64(latency)*1000/int64(rate), clockID)
 				announced = true
 			}
 		}
