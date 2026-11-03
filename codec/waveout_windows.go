@@ -5,9 +5,7 @@ package codec
 import (
 	"fmt"
 	"log"
-	"math"
 	"sync"
-	"sync/atomic"
 	"syscall"
 	"time"
 	"unsafe"
@@ -54,6 +52,21 @@ type waveFormatExtensible struct {
 // KSDATAFORMAT_SUBTYPE_PCM
 var subtypePCM = [16]byte{0x01, 0, 0, 0, 0, 0, 0x10, 0, 0x80, 0, 0, 0xaa, 0, 0x38, 0x9b, 0x71}
 
+// pcmFormat describes interleaved stereo integer PCM; sizes above 16 bits
+// need WAVE_FORMAT_EXTENSIBLE.
+func pcmFormat(rate, bits int) waveFormatExtensible {
+	frameBytes := 2 * bits / 8
+	format := waveFormatExtensible{
+		Tag: 1, Channels: 2, SamplesPerSec: uint32(rate),
+		AvgBytesPerSec: uint32(rate * frameBytes), BlockAlign: uint16(frameBytes), BitsPerSample: uint16(bits),
+	}
+	if bits > 16 {
+		format.Tag, format.ExtraSize = 0xfffe, 22
+		format.ValidBits, format.ChannelMask, format.SubFormat = uint16(bits), 3, subtypePCM
+	}
+	return format
+}
+
 type waveHeader struct {
 	Data             uintptr
 	Length, Recorded uint32
@@ -81,7 +94,7 @@ type waveOutCaps struct {
 
 // Devices lists waveOut devices. Windows truncates their names to 31
 // characters.
-func Devices() ([]Device, error) {
+func waveOutDevices() ([]Device, error) {
 	if err := waveNumDevs.Find(); err != nil {
 		return nil, err
 	}
@@ -105,14 +118,13 @@ type WaveOutStream struct {
 	buffers             []waveBuffer
 	converter           *converter
 	callback            StreamCallback
-	volume              uint64
-	localVolume         uint64
-	mu                  sync.Mutex
-	stop, done          chan struct{}
+	*softVolume
+	mu         sync.Mutex
+	stop, done chan struct{}
 }
 
-func NewStream() Stream {
-	return &WaveOutStream{volume: math.Float64bits(1), localVolume: math.Float64bits(1)}
+func newWaveOutStream(volume *softVolume) *WaveOutStream {
+	return &WaveOutStream{softVolume: volume}
 }
 
 func waveError(operation string, code uintptr) error {
@@ -146,7 +158,7 @@ func (s *WaveOutStream) Init(callback StreamCallback) error {
 func (s *WaveOutStream) open() error {
 	id, name := uintptr(waveMapper), "system default"
 	if s.config.Device != "" {
-		devices, err := Devices()
+		devices, err := waveOutDevices()
 		if err != nil {
 			return err
 		}
@@ -156,16 +168,8 @@ func (s *WaveOutStream) open() error {
 		}
 		id, name = uintptr(device.Index), device.Name
 	}
-	bytes := s.config.Bits / 8
-	s.frameBytes = 2 * bytes
-	format := waveFormatExtensible{
-		Tag: 1, Channels: 2, SamplesPerSec: uint32(s.config.Rate),
-		AvgBytesPerSec: uint32(s.config.Rate * s.frameBytes), BlockAlign: uint16(s.frameBytes), BitsPerSample: uint16(s.config.Bits),
-	}
-	if s.config.Bits > 16 {
-		format.Tag, format.ExtraSize = 0xfffe, 22
-		format.ValidBits, format.ChannelMask, format.SubFormat = uint16(s.config.Bits), 3, subtypePCM
-	}
+	s.frameBytes = 2 * s.config.Bits / 8
+	format := pcmFormat(s.config.Rate, s.config.Bits)
 	code, _, _ := waveOpen.Call(uintptr(unsafe.Pointer(&s.device)), id, uintptr(unsafe.Pointer(&format)), s.event, 0, 0x50000) // CALLBACK_EVENT
 	if err := waveError(fmt.Sprintf("open output %q at %d Hz %d-bit", name, s.config.Rate, s.config.Bits), code); err != nil {
 		s.device = 0
@@ -279,10 +283,6 @@ func (s *WaveOutStream) run(stop <-chan struct{}, done chan<- struct{}) {
 	}
 }
 
-func (s *WaveOutStream) gain() float64 {
-	return math.Float64frombits(atomic.LoadUint64(&s.volume)) * math.Float64frombits(atomic.LoadUint64(&s.localVolume))
-}
-
 func (s *WaveOutStream) Stop() error {
 	s.mu.Lock()
 	defer s.mu.Unlock()
@@ -307,28 +307,6 @@ func (s *WaveOutStream) Release() error {
 	defer s.mu.Unlock()
 	s.stopLocked()
 	s.closeDevice()
-	return nil
-}
-
-func (s *WaveOutStream) SetVolume(db float64) error {
-	if math.IsNaN(db) {
-		return fmt.Errorf("invalid volume")
-	}
-	gain := 0.0
-	if db > -144 {
-		gain = math.Pow(10, math.Min(db, 0)/20)
-	}
-	atomic.StoreUint64(&s.volume, math.Float64bits(gain))
-	return nil
-}
-
-// SetLocalVolume controls this receiver only and composes with the AirPlay
-// sender's volume. Value 1 is unity gain; value 0 mutes this receiver.
-func (s *WaveOutStream) SetLocalVolume(gain float64) error {
-	if math.IsNaN(gain) || math.IsInf(gain, 0) || gain < 0 || gain > 1 {
-		return fmt.Errorf("local volume must be between 0 and 1")
-	}
-	atomic.StoreUint64(&s.localVolume, math.Float64bits(gain))
 	return nil
 }
 
