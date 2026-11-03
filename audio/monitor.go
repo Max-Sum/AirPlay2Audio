@@ -47,8 +47,12 @@ func (p *Player) setFormat(rate, bits int) {
 // logged. Counts in it are also kept for the next Statistics line.
 func (p *Player) Monitor() string {
 	p.statsMu.Lock()
-	cur := p.take()
-	p.unlogged.merge(cur)
+	fresh := p.take()
+	p.unlogged.merge(fresh)
+	cur := p.unmonitored
+	p.unmonitored = period{}
+	p.monitored = true
+	cur.merge(fresh)
 	now := time.Now()
 	received := p.audioBytes.Swap(0)
 	var kbps int64

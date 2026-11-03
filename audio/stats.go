@@ -153,7 +153,11 @@ func (p *Player) Statistics(elapsed time.Duration) (string, bool) {
 	p.statsMu.Lock()
 	cur := p.unlogged
 	p.unlogged = period{}
-	cur.merge(p.take())
+	fresh := p.take()
+	cur.merge(fresh)
+	if p.monitored {
+		p.unmonitored.merge(fresh)
+	}
 	p.statsMu.Unlock()
 	s, n := cur.statistics, cur.net
 	p.mu.Lock()

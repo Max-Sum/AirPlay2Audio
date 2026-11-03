@@ -44,6 +44,32 @@ func TestMonitorReportsStreamAndKeepsCountsForStatistics(t *testing.T) {
 	}
 }
 
+// The 10 s statistics line and the 1 s monitor tick can fire together. When
+// the log line reads first, the monitor must still see that second's audio
+// rather than report playback as paused.
+func TestStatisticsDoNotEmptyMonitor(t *testing.T) {
+	p := &Player{clock: &Clock{virtualClock: ptp.NewVirtualClock(0)}, ringBuffer: NewRing(4), synchronized: true, sync: DefaultSyncOptions}
+	p.setStream("realtime", "alac")
+	p.Monitor()
+	p.stats.output(44100, 44100)
+	p.AddNetwork(125, 0, 0, 0, 0, 0)
+	stats, ok := p.Statistics(10 * time.Second)
+	if !ok || !strings.Contains(stats, "output=44100") || !strings.Contains(stats, "packets=125") {
+		t.Fatalf("statistics: %q", stats)
+	}
+	line := p.Monitor()
+	if !strings.Contains(line, "output=44100") || !strings.Contains(line, "rx=125") {
+		t.Fatalf("monitor lost the counts the log took: %q", line)
+	}
+	// Each count is reported once to each reader.
+	if stats, _ := p.Statistics(time.Second); strings.Contains(stats, "packets=125") {
+		t.Fatalf("statistics counted twice: %q", stats)
+	}
+	if line := p.Monitor(); !strings.Contains(line, "output=0") || !strings.Contains(line, "rx=0") {
+		t.Fatalf("monitor counted twice: %q", line)
+	}
+}
+
 func TestStatisticsMerge(t *testing.T) {
 	var a, b statistics
 	a.observeError(10)
