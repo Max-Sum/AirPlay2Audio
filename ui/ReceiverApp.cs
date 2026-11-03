@@ -318,6 +318,7 @@ internal sealed class Settings
     public string DeviceName = DefaultName();
     public string NetworkInterface = "";
     public int DelayMs = 0;
+    public int OutputLatencyMs = 0; // reported to the sender in /info
     public bool Synchronize = true;
     public int LocalVolume = 100;
     public bool TraceLog = false;
@@ -393,6 +394,7 @@ internal sealed class Settings
             case "DeviceName": if (value.Length > 0) DeviceName = value; break;
             case "NetworkInterface": NetworkInterface = value; break;
             case "DelayMs": if (Int32.TryParse(value, out n)) DelayMs = Math.Max(-500, Math.Min(500, n)); break;
+            case "OutputLatencyMs": if (Int32.TryParse(value, out n)) OutputLatencyMs = Math.Max(0, Math.Min(10000, n)); break;
             case "Synchronize": if (Boolean.TryParse(value, out b)) Synchronize = b; break;
             case "LocalVolume": if (Int32.TryParse(value, out n)) LocalVolume = Math.Max(0, Math.Min(100, n)); break;
             case "TraceLog": if (Boolean.TryParse(value, out b)) TraceLog = b; break;
@@ -453,6 +455,7 @@ internal sealed class Settings
                 "DeviceName=" + DeviceName.Replace("\r", "").Replace("\n", ""),
                 "NetworkInterface=" + NetworkInterface,
                 "DelayMs=" + DelayMs.ToString(CultureInfo.InvariantCulture),
+                "OutputLatencyMs=" + OutputLatencyMs.ToString(CultureInfo.InvariantCulture),
                 "Synchronize=" + Synchronize,
                 "LocalVolume=" + LocalVolume.ToString(CultureInfo.InvariantCulture),
                 "TraceLog=" + TraceLog,
@@ -600,6 +603,7 @@ internal sealed class Engine
         if (s.Statistics) args.Append(" -statistics");
         if (s.Dither != "auto") args.Append(" -dither ").Append(s.Dither);
         if (s.RealtimeAnchor != "shairport") args.Append(" -realtime-anchor ").Append(s.RealtimeAnchor);
+        if (s.OutputLatencyMs != 0) args.Append(" -output-latency ").Append(s.OutputLatencyMs.ToString(CultureInfo.InvariantCulture));
         if (!s.DriftCorrection) args.Append(" -drift-correction=false");
         if (s.DriftToleranceMs != 2) args.Append(" -drift-tolerance ").Append(s.DriftToleranceMs.ToString("R", CultureInfo.InvariantCulture));
         if (s.ResyncThresholdMs != 50) args.Append(" -resync-threshold ").Append(s.ResyncThresholdMs.ToString("R", CultureInfo.InvariantCulture));
@@ -1604,6 +1608,7 @@ internal sealed class AdvancedForm : Form
     private readonly NumericUpDown delay = new NumericUpDown();
     private readonly CheckBox synchronize = new CheckBox();
     private readonly ComboBox anchor = new ComboBox();
+    private readonly NumericUpDown outputLatency = new NumericUpDown();
     private readonly CheckBox driftCorrection = new CheckBox();
     private readonly NumericUpDown driftTolerance = new NumericUpDown();
     private readonly NumericUpDown resyncThreshold = new NumericUpDown();
@@ -1672,6 +1677,9 @@ internal sealed class AdvancedForm : Form
             new NetworkChoice { Name = "low-latency", Label = L.T("低延迟（约早 1.75 秒）", "Low latency (~1.75 s earlier)") });
         Row(g, L.T("实时流定时", "Realtime timing"), anchor, null);
         Row(g, null, Note(L.T("iOS 有声音明显滞后可使用低延迟模式", "If sound clearly lags on iOS, use low latency")), null);
+        Number(outputLatency, 0, 10000, s.OutputLatencyMs, 0, 10);
+        Row(g, L.T("报告延迟", "Reported latency"), outputLatency, L.T("毫秒", "ms"));
+        Row(g, null, Note(L.T("向发送端报告的链路延迟", "Link latency reported to the sender")), null);
 
         g = Section(left, L.T("音频输出", "Audio output"));
         device.DropDownStyle = ComboBoxStyle.DropDownList; device.Dock = DockStyle.Fill;
@@ -1972,6 +1980,7 @@ internal sealed class AdvancedForm : Form
         n.DelayMs = (int)delay.Value;
         n.Synchronize = synchronize.Checked;
         n.RealtimeAnchor = Chosen(anchor, settings.RealtimeAnchor);
+        n.OutputLatencyMs = (int)outputLatency.Value;
         n.OutputDevice = Chosen(device, settings.OutputDevice);
         OutputFormat outputFormat = format.SelectedItem as OutputFormat ?? OutputFormat.All[0];
         n.OutputRate = outputFormat.Rate;
@@ -1997,6 +2006,7 @@ internal sealed class AdvancedForm : Form
 
         Changed = n.NetworkInterface != settings.NetworkInterface || n.IPv4Only != settings.IPv4Only
             || n.DelayMs != settings.DelayMs || n.Synchronize != settings.Synchronize || n.RealtimeAnchor != settings.RealtimeAnchor
+            || n.OutputLatencyMs != settings.OutputLatencyMs
             || n.OutputDevice != settings.OutputDevice || n.OutputRate != settings.OutputRate || n.OutputBits != settings.OutputBits
             || n.Dither != settings.Dither
             || n.TraceLog != settings.TraceLog || n.Statistics != settings.Statistics
@@ -2015,6 +2025,7 @@ internal sealed class AdvancedForm : Form
         settings.DelayMs = n.DelayMs;
         settings.Synchronize = n.Synchronize;
         settings.RealtimeAnchor = n.RealtimeAnchor;
+        settings.OutputLatencyMs = n.OutputLatencyMs;
         settings.OutputDevice = n.OutputDevice;
         settings.OutputRate = n.OutputRate;
         settings.OutputBits = n.OutputBits;

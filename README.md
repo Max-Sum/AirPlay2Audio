@@ -65,6 +65,7 @@ These are the command-line options of `AirPlay2Engine.exe`. The window's advance
 | `-sync` | `true` | Schedule audio against the sender clock. `-sync=false` plays audio as it arrives, without sync |
 | `-realtime-anchor` | `shairport` | AirPlay 2 realtime stream timing, `shairport` or `low-latency`. See [Sync and latency](#sync-and-latency) |
 | `-delay` | `0` | Extra output latency compensation in milliseconds, from -500 to 500 |
+| `-output-latency` | `0` | Link latency in milliseconds reported to the sender, from 0 to 10000 |
 | `-drift-correction` | `true` | Correct clock drift by adding or removing single samples |
 | `-drift-tolerance` | `2` | Timing error in milliseconds allowed before drift correction starts |
 | `-resync-threshold` | `50` | Timing error in milliseconds above which playback skips or inserts silence |
