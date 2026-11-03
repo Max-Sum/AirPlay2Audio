@@ -41,15 +41,15 @@ type outBlock struct {
 
 type fakeOutput struct {
 	mu     sync.Mutex
-	cb     codec.StreamCallback
+	src    codec.Source
 	stop   chan struct{}
 	done   chan struct{}
 	blocks []outBlock
 }
 
-func (o *fakeOutput) Init(cb codec.StreamCallback) error {
+func (o *fakeOutput) Init(src codec.Source) error {
 	o.mu.Lock()
-	o.cb = cb
+	o.src = src
 	o.mu.Unlock()
 	return nil
 }
@@ -60,12 +60,12 @@ func (o *fakeOutput) Start() error {
 	if o.stop != nil {
 		return nil
 	}
-	stop, done, cb := make(chan struct{}), make(chan struct{}), o.cb
+	stop, done, src := make(chan struct{}), make(chan struct{}), o.src
 	o.stop, o.done = stop, done
 	go func() {
 		defer close(done)
-		out := make([]int16, 1024)
-		period := 512 * time.Second / 44100
+		out := make([]int32, 1024)
+		var period time.Duration
 		next := time.Now()
 		for {
 			select {
@@ -73,10 +73,12 @@ func (o *fakeOutput) Start() error {
 				return
 			default:
 			}
-			cb(out, 0, 30*time.Millisecond)
+			// A real output asks for the format before every block.
+			period = 512 * time.Second / time.Duration(src.Format().Rate)
+			src.Fill(out, 0, 30*time.Millisecond)
 			sound := false
 			for _, v := range out {
-				if v > 100 || v < -100 {
+				if v > 100<<16 || v < -100<<16 {
 					sound = true
 					break
 				}

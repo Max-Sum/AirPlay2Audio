@@ -35,7 +35,7 @@ func simulateDrift(t *testing.T, ppm float64, correct bool) (maxErr float64, res
 }
 
 func TestDriftCorrectionTracksSenderClock(t *testing.T) {
-	tolerance := float64(DefaultSyncOptions.Tolerance) * float64(sampleRate) / float64(time.Second)
+	tolerance := float64(DefaultSyncOptions.Tolerance) * float64(cdRate) / float64(time.Second)
 	for _, ppm := range []float64{300, -300, 50} {
 		maxErr, resyncs, net := simulateDrift(t, ppm, true)
 		if resyncs != 0 || maxErr > tolerance+50 {
@@ -55,12 +55,12 @@ func TestDriftCorrectionTracksSenderClock(t *testing.T) {
 
 func TestStretchedBlockJoinsNeighbours(t *testing.T) {
 	p := &Player{ringBuffer: NewRing(2)}
-	ramp := make([]int16, 20*2)
+	ramp := make([]int32, 20*2)
 	for i := 0; i < 20; i++ {
-		ramp[2*i], ramp[2*i+1] = int16(i*100), int16(-i*100)
+		ramp[2*i], ramp[2*i+1] = int32(i*100), int32(-i*100)
 	}
 	p.Push(testPCM(0, 1, ramp...))
-	out := make([]int16, 8*2)
+	out := make([]int32, 8*2)
 	// Consume 9 samples into 8: first and last are kept exactly.
 	p.renderStretched(out, 0, 9)
 	if out[0] != 0 || out[14] != 800 || out[15] != -800 {

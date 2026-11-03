@@ -3,6 +3,7 @@ package audio
 import (
 	"encoding/binary"
 	"fmt"
+	"github.com/Max-Sum/AirPlay2Audio/codec"
 	"github.com/brutella/hc/crypto/chacha20poly1305"
 	"github.com/pion/rtp"
 )
@@ -12,9 +13,12 @@ type TcpPacket struct {
 	SequenceNumber uint32
 }
 
+// PCMFrame is decoded stereo audio. Its timestamp counts frames at its own
+// rate.
 type PCMFrame struct {
 	TcpPacket
-	pcmData []byte
+	samples []int32 // interleaved stereo, left-aligned (see codec.FullScale)
+	format  codec.Format
 	aac     bool // decoded from AAC: muted after a discontinuity
 }
 
@@ -22,12 +26,36 @@ type PCMFrame struct {
 // carries decoder start-up noise (shairport-sync mutes it the same way).
 func (p *PCMFrame) muteAAC() {
 	if p.aac {
-		clear(p.pcmData)
+		clear(p.samples)
 	}
 }
 
-func (p *PCMFrame) Data() []byte {
-	return p.pcmData
+// Data returns the interleaved stereo samples.
+func (p *PCMFrame) Data() []int32 { return p.samples }
+
+// Format returns the rate and sample size of the frame.
+func (p *PCMFrame) Format() codec.Format { return p.format }
+
+// frames is the number of stereo frames.
+func (p *PCMFrame) frames() int { return len(p.samples) / 2 }
+
+// pcm16 reads little-endian 16-bit PCM.
+func pcm16(pcm []byte) []int32 {
+	out := make([]int32, len(pcm)/2)
+	for i := range out {
+		out[i] = int32(int16(binary.LittleEndian.Uint16(pcm[i*2:]))) << 16
+	}
+	return out
+}
+
+// pcm24 reads packed little-endian 24-bit PCM.
+func pcm24(pcm []byte) []int32 {
+	out := make([]int32, len(pcm)/3)
+	for i := range out {
+		b := pcm[i*3:]
+		out[i] = int32(uint32(b[0])<<8 | uint32(b[1])<<16 | uint32(b[2])<<24)
+	}
+	return out
 }
 
 // NewFrame authenticates and decrypts a buffered packet, then decodes it

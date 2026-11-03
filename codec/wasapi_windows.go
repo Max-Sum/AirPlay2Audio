@@ -241,7 +241,7 @@ type wasapiCommand struct {
 type wasapiStream struct {
 	*softVolume
 	config   OutputConfig
-	callback StreamCallback
+	source   Source
 	mu       sync.Mutex // serializes the public methods
 	commands chan wasapiCommand
 	done     chan struct{}
@@ -255,16 +255,22 @@ type wasapiStream struct {
 	chunkFrames                        uint32        // output frames per player block
 	latency                            time.Duration // the audio engine's own delay
 	frameBytes                         int
+	input                              Format // what the player produces
+	format                             Format // what the device was opened with
 	converter                          *converter
 	playing                            bool
 }
+
+// errFormatChanged reports that the player's format changed and the device
+// must be opened again with the new output format.
+var errFormatChanged = errors.New("stream format changed")
 
 func newWASAPIStream(volume *softVolume) *wasapiStream {
 	return &wasapiStream{softVolume: volume}
 }
 
-func (s *wasapiStream) Init(callback StreamCallback) error {
-	s.callback = callback
+func (s *wasapiStream) Init(source Source) error {
+	s.source = source
 	s.config = Output
 	if err := s.config.Validate(); err != nil {
 		return err
@@ -272,7 +278,6 @@ func (s *wasapiStream) Init(callback StreamCallback) error {
 	if s.config.BufferMs == 0 {
 		s.config.BufferMs = DefaultBufferMs
 	}
-	s.frameBytes = 2 * s.config.Bits / 8
 	s.commands = make(chan wasapiCommand)
 	s.done = make(chan struct{})
 	ready := make(chan error, 1)
@@ -404,7 +409,11 @@ func (s *wasapiStream) loop() {
 				continue
 			}
 		}
-		if err := s.fill(); err != nil {
+		if err := s.fill(); errors.Is(err, errFormatChanged) {
+			s.closeDevice()
+			retry = time.Time{}
+			continue
+		} else if err != nil {
 			log.Printf("AUDIO WASAPI output lost (%v); reopening", err)
 			s.closeDevice()
 			retry = time.Time{}
@@ -456,7 +465,13 @@ func (s *wasapiStream) restart() error {
 // startClient fills the queue first, so playback does not begin with a
 // gap, then starts the device.
 func (s *wasapiStream) startClient() error {
-	if err := s.fill(); err != nil {
+	err := s.fill()
+	if errors.Is(err, errFormatChanged) {
+		if err = s.open(); err == nil {
+			err = s.fill()
+		}
+	}
+	if err != nil {
 		return err
 	}
 	return check("start output", s.client.call(clientStart))
@@ -525,7 +540,9 @@ func (s *wasapiStream) open() error {
 	if id, err := deviceID(device); err == nil {
 		s.deviceID = id
 	}
-	rate, bits := s.config.Rate, s.config.Bits
+	in := s.source.Format()
+	out := s.config.Resolve(in)
+	rate, bits := out.Rate, out.Bits
 	format := pcmFormat(rate, bits)
 	// Windows converts our format to the engine's mix format. A device
 	// buffer larger than what is kept queued leaves room for a late wakeup.
@@ -565,10 +582,12 @@ func (s *wasapiStream) open() error {
 	// Less than one engine period would run dry on every pass.
 	keep = max(keep, periodFrames+uint32(rate/1000))
 	s.keepFrames = min(keep, bufferFrames)
-	s.chunkFrames = uint32(waveSourceFrames * rate / SourceRate)
-	s.converter = newConverter(s.config, waveSourceFrames)
+	s.chunkFrames = uint32(blockFrames(rate))
+	s.frameBytes = 2 * bits / 8
+	s.input, s.format = in, out
+	s.converter = newConverter(out, s.config.Dither, in)
 	ms := func(frames uint32) float64 { return float64(frames) * 1000 / float64(rate) }
-	log.Printf("AUDIO output device=%q format=%d Hz %d-bit dither=%s", name, rate, bits, s.config.Dither)
+	log.Printf("AUDIO output device=%q format=%d Hz %d-bit (stream %d Hz %d-bit) dither=%s", name, rate, bits, in.Rate, in.Bits, s.config.Dither)
 	log.Printf("AUDIO WASAPI shared mode: keeping %.1f ms queued (device buffer %.1f ms, engine period %.1f ms, engine latency %.1f ms)",
 		ms(s.keepFrames), ms(bufferFrames), float64(time.Duration(period)*referenceTimeUnit)/float64(time.Millisecond),
 		float64(s.latency)/float64(time.Millisecond))
@@ -583,6 +602,14 @@ func (s *wasapiStream) fill() error {
 		return err
 	}
 	for padding < s.keepFrames {
+		if in := s.source.Format(); in != s.input {
+			if s.config.Resolve(in) != s.format {
+				log.Printf("AUDIO stream format changed to %d Hz %d-bit; reopening output", in.Rate, in.Bits)
+				return errFormatChanged
+			}
+			log.Printf("AUDIO stream format changed to %d Hz %d-bit; output stays %d Hz %d-bit", in.Rate, in.Bits, s.format.Rate, s.format.Bits)
+			s.input, s.converter = in, newConverter(s.format, s.config.Dither, in)
+		}
 		n := min(s.keepFrames-padding, s.chunkFrames)
 		var data uintptr
 		if err := check("get output buffer", s.render.call(renderGetBuffer, uintptr(n), uintptr(unsafe.Pointer(&data)))); err != nil {
@@ -591,10 +618,10 @@ func (s *wasapiStream) fill() error {
 		out := unsafe.Slice((*byte)(unsafe.Pointer(data)), int(n)*s.frameBytes)
 		// Audio written now plays after what is queued, the engine's own
 		// delay, and what the resampler still holds.
-		ahead := frameTime(uint64(padding), s.config.Rate) + s.latency
-		s.converter.fill(out, int(n), s.gain(), func(src []int16) {
-			pending := time.Duration(s.converter.pendingSourceFrames() * float64(time.Second) / SourceRate)
-			s.callback(src, 0, ahead+pending)
+		ahead := frameTime(uint64(padding), s.format.Rate) + s.latency
+		s.converter.fill(out, int(n), s.gain(), func(src []int32) {
+			pending := time.Duration(s.converter.pendingSourceFrames() * float64(time.Second) / float64(s.input.Rate))
+			s.source.Fill(src, 0, ahead+pending)
 		})
 		if err := check("write output buffer", s.render.call(renderFreeBuffer, uintptr(n), 0)); err != nil {
 			return err

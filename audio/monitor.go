@@ -16,9 +16,10 @@ type StreamInfo struct {
 	// Latency is the playback latency the sender asked for (realtime and
 	// AirPlay 1), or how far ahead it scheduled the first sample (buffered).
 	Latency time.Duration
-	// Rate is the sample rate the sender encodes at, which can differ from
-	// the player's 44.1 kHz. Bits is the sample size of a lossless stream; 0
-	// when unknown or lossy. Both are 0 until the first packet is decoded.
+	// Rate is the sample rate the sender encodes at, which the player and,
+	// by default, the output follow. Bits is the sample size of a lossless
+	// stream; 0 when unknown or lossy. Both are 0 until the first packet is
+	// decoded.
 	Rate, Bits int
 }
 
@@ -69,6 +70,7 @@ func (p *Player) Monitor() string {
 	info := p.info
 	synchronized := p.synchronized
 	smoothed := p.syncError
+	rate := int(p.rate())
 	backlog := p.backlog()
 	p.mu.Unlock()
 	clockLocked := p.clock.virtualClock != nil && p.clock.virtualClock.Synchronized()
@@ -77,7 +79,7 @@ func (p *Player) Monitor() string {
 		delay = p.clock.virtualClock.OutputDelay()
 	}
 
-	msf := func(samples float64) string { return fmt.Sprintf("%.2f", samples*1000/float64(sampleRate)) }
+	msf := func(samples float64) string { return fmt.Sprintf("%.2f", samples*1000/float64(rate)) }
 	kind, codec := info.Kind, info.Codec
 	if kind == "" {
 		kind, codec = "idle", "-"

@@ -67,7 +67,7 @@ func decodeRealtimePacket(decoder *alac.PacketDecoder, key, raw []byte) (*PCMFra
 	if err != nil {
 		return nil, err
 	}
-	return &PCMFrame{TcpPacket: TcpPacket{Packet: packet, SequenceNumber: uint32(packet.SequenceNumber)}, pcmData: pcm}, nil
+	return &PCMFrame{TcpPacket: TcpPacket{Packet: packet, SequenceNumber: uint32(packet.SequenceNumber)}, samples: pcm16(pcm), format: cdFormat}, nil
 }
 
 // Resend timing. In synchronized mode packets arrive a few hundred
@@ -259,7 +259,7 @@ func (s *Server) receiveRealtime(conn *net.UDPConn, decodePacket func([]byte) (*
 			received++
 			decodedTotal++
 			s.addBytes(len(datagram.data) - overhead)
-			samples += uint64(len(frame.pcmData) / 4)
+			samples += uint64(frame.frames())
 			if lead, ok := s.player.ArrivalLead(frame.Timestamp); ok {
 				if !haveLead || lead < minLead {
 					minLead = lead
@@ -388,8 +388,8 @@ func (s *Server) receiveRealtimeControl(conn *net.UDPConn, link *realtimeControl
 				// Bytes 16..20 hold the frame the network time refers to; the
 				// difference is the sender's stream latency (normally 77175).
 				latency := int32(binary.BigEndian.Uint32(buffer[16:20]) - binary.BigEndian.Uint32(buffer[4:8]))
-				s.noteLatency(time.Duration(latency) * time.Second / time.Duration(sampleRate))
-				log.Printf("AUDIO realtime PTP anchor received; stream latency=%d samples (%d ms) clock=%016x", latency, int64(latency)*1000/sampleRate, clockID)
+				s.noteLatency(time.Duration(latency) * time.Second / time.Duration(cdRate))
+				log.Printf("AUDIO realtime PTP anchor received; stream latency=%d samples (%d ms) clock=%016x", latency, int64(latency)*1000/cdRate, clockID)
 				announced = true
 			}
 		}

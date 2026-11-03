@@ -63,10 +63,10 @@ func NewStream() Stream { return &windowsStream{softVolume: newSoftVolume()} }
 
 func useWaveOut() bool { return strings.EqualFold(Output.API, "waveout") }
 
-func (s *windowsStream) Init(callback StreamCallback) error {
+func (s *windowsStream) Init(source Source) error {
 	if !useWaveOut() {
 		w := newWASAPIStream(s.softVolume)
-		err := w.Init(callback)
+		err := w.Init(source)
 		if err == nil {
 			s.impl = w
 			return nil
@@ -74,7 +74,7 @@ func (s *windowsStream) Init(callback StreamCallback) error {
 		log.Printf("AUDIO WASAPI output unavailable (%v); using waveOut", err)
 	}
 	w := newWaveOutStream(s.softVolume)
-	if err := w.Init(callback); err != nil {
+	if err := w.Init(source); err != nil {
 		return err
 	}
 	s.impl = w

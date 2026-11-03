@@ -74,7 +74,7 @@ func (s *Server) SetupClassic(format ClassicFormat, peer ClassicPeer) (int, int,
 	timing := ntp.Start(timingConn, &net.UDPAddr{IP: peer.Addr.IP, Zone: peer.Addr.Zone, Port: peer.TimingPort}, clock)
 	done, finish := s.startUDP(data, control, timing, format.SamplesPerPacket(), "AUDIO AirPlay 1 connection closed")
 	s.describe("classic", format.Codec)
-	s.noteFormat(int(sampleRate), 16)
+	s.noteFormat(cdRate, 16)
 	link := &realtimeControlLink{conn: control, resent: make(chan realtimeDatagram, 64)}
 	if peer.ControlPort > 0 {
 		link.remote.Store(&net.UDPAddr{IP: peer.Addr.IP, Zone: peer.Addr.Zone, Port: peer.ControlPort})
@@ -100,7 +100,7 @@ func classicDecoder(format ClassicFormat) (func([]byte) (*PCMFrame, error), erro
 	switch format.Codec {
 	case "alac":
 		cfg := format.ALAC
-		if cfg.BitDepth != 16 || cfg.NumChannels != 2 || cfg.SampleRate != uint32(sampleRate) {
+		if cfg.BitDepth != 16 || cfg.NumChannels != 2 || cfg.SampleRate != cdRate {
 			return nil, fmt.Errorf("unsupported ALAC format: %d-bit, %d channels, %d Hz", cfg.BitDepth, cfg.NumChannels, cfg.SampleRate)
 		}
 		decoder, err := alac.NewPacketDecoder(cfg)
@@ -150,7 +150,7 @@ func decodeClassicPacket(raw []byte, block cipher.Block, iv []byte, decode func(
 	if len(pcm) == 0 {
 		return nil, nil
 	}
-	return &PCMFrame{TcpPacket: TcpPacket{Packet: packet, SequenceNumber: uint32(packet.SequenceNumber)}, pcmData: pcm}, nil
+	return &PCMFrame{TcpPacket: TcpPacket{Packet: packet, SequenceNumber: uint32(packet.SequenceNumber)}, samples: pcm16(pcm), format: cdFormat}, nil
 }
 
 // receiveClassicControl handles sync packets, which anchor RTP time to the
@@ -176,8 +176,8 @@ func (s *Server) receiveClassicControl(conn *net.UDPConn, link *realtimeControlL
 			stamp, networkTime, latency := parseClassicSync(buffer[:n])
 			s.anchor(networkTime, stamp)
 			if !announced {
-				s.noteLatency(time.Duration(int64(latency)+ClassicLatencyAllowance) * time.Second / time.Duration(sampleRate))
-				log.Printf("AUDIO AirPlay 1 sync received; sender latency=%d samples (%d ms) plus %d", latency, int64(latency)*1000/sampleRate, ClassicLatencyAllowance)
+				s.noteLatency(time.Duration(int64(latency)+ClassicLatencyAllowance) * time.Second / time.Duration(cdRate))
+				log.Printf("AUDIO AirPlay 1 sync received; sender latency=%d samples (%d ms) plus %d", latency, int64(latency)*1000/cdRate, ClassicLatencyAllowance)
 				announced = true
 			}
 		case 0x56: // resent audio: a 4-byte header, then the original packet

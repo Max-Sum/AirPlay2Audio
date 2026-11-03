@@ -1,23 +1,39 @@
 package codec
 
-import "math"
+import (
+	"encoding/binary"
+	"math"
+	"time"
+)
 
-// converter turns the player's 44.1 kHz int16 stereo into the configured
-// output format: gain in floating point, optional resampling, then
-// quantization to 16, 24 or 32 bits with optional TPDF dither.
+// Blocks taken from the player last blockSize frames at blockRate, whatever
+// the actual rate, so queue depths do not depend on the format.
+const (
+	blockSize = 512
+	blockRate = 44100
+)
+
+// blockFrames is the number of frames in one block at rate.
+func blockFrames(rate int) int { return blockSize * rate / blockRate }
+
+// converter turns the player's int32 stereo into the output format: gain in
+// floating point, resampling when the rates differ, then quantization to
+// 16, 24 or 32 bits with optional TPDF dither.
 type converter struct {
 	bits      int
 	dither    string
-	resampler *resampler // nil at 44.1 kHz
-	source    []int16    // one block from the player
+	deep      bool       // the source has more bits than the output
+	resampler *resampler // nil when the rates match
+	source    []int32    // one block from the player
 	mix       []float64
 	rng       uint64
 }
 
-func newConverter(cfg OutputConfig, sourceFrames int) *converter {
-	c := &converter{bits: cfg.Bits, dither: cfg.Dither, source: make([]int16, sourceFrames*2), rng: 0x9e3779b97f4a7c15}
-	if cfg.Rate != SourceRate {
-		c.resampler = newResampler(SourceRate, cfg.Rate)
+func newConverter(out Format, dither string, in Format) *converter {
+	c := &converter{bits: out.Bits, dither: dither, deep: in.Bits > out.Bits,
+		source: make([]int32, blockFrames(in.Rate)*2), rng: 0x9e3779b97f4a7c15}
+	if in.Rate != out.Rate {
+		c.resampler = newResampler(in.Rate, out.Rate)
 	}
 	return c
 }
@@ -32,25 +48,25 @@ func (c *converter) pendingSourceFrames() float64 {
 }
 
 // fill produces frames output frames into out (interleaved stereo bytes),
-// calling pull for 44.1 kHz source blocks as needed.
-func (c *converter) fill(out []byte, frames int, gain float64, pull func([]int16)) {
+// calling pull for source blocks as needed.
+func (c *converter) fill(out []byte, frames int, gain float64, pull func([]int32)) {
 	if cap(c.mix) < frames*2 {
 		c.mix = make([]float64, frames*2)
 	}
 	mix := c.mix[:frames*2]
 	if c.resampler == nil {
-		// One source block per output block; sizes match at 44.1 kHz.
+		// One source block per output block; the rates match.
 		if cap(c.source) < frames*2 {
-			c.source = make([]int16, frames*2)
+			c.source = make([]int32, frames*2)
 		}
 		src := c.source[:frames*2]
 		clear(src)
 		pull(src)
 		for i, v := range src {
-			mix[i] = float64(v) / 32768
+			mix[i] = float64(v) / FullScale
 		}
 	} else {
-		c.resampler.read(mix, func() []int16 {
+		c.resampler.read(mix, func() []int32 {
 			clear(c.source)
 			pull(c.source)
 			return c.source
@@ -62,7 +78,7 @@ func (c *converter) fill(out []byte, frames int, gain float64, pull func([]int16
 			mix[i] *= gain
 		}
 	}
-	dither := c.dither == "on" || c.dither == "auto" && c.bits == 16 && modified
+	dither := c.dither == "on" || c.dither == "auto" && c.bits == 16 && (modified || c.deep)
 	c.quantize(out, mix, dither)
 }
 
@@ -101,9 +117,8 @@ func (c *converter) tpdf() float64 {
 	return next() - next()
 }
 
-// resampler converts interleaved stereo with a windowed-sinc kernel. Only
-// upsampling from 44.1 kHz is configured, so the cutoff is below the source
-// Nyquist frequency.
+// resampler converts interleaved stereo with a windowed-sinc kernel. When
+// it downsamples, the cutoff follows the lower rate.
 type resampler struct {
 	step   float64 // source frames per output frame
 	pos    float64 // read position in history, in source frames
@@ -115,7 +130,7 @@ type resampler struct {
 
 func newResampler(from, to int) *resampler {
 	r := &resampler{step: float64(from) / float64(to), taps: 16, phases: 512}
-	cutoff := 0.5 * 0.91 // of the source rate, leaving a transition band below 22.05 kHz
+	cutoff := 0.5 * 0.91 // of the source rate, leaving a transition band below its Nyquist frequency
 	if to < from {
 		cutoff *= float64(to) / float64(from)
 	}
@@ -163,11 +178,11 @@ func newResampler(from, to int) *resampler {
 
 func (r *resampler) pending() float64 { return float64(len(r.hist)/2) - r.pos }
 
-func (r *resampler) read(out []float64, more func() []int16) {
+func (r *resampler) read(out []float64, more func() []int32) {
 	for i := 0; i+1 < len(out); i += 2 {
 		for !r.ready() {
 			for _, v := range more() {
-				r.hist = append(r.hist, float64(v)/32768)
+				r.hist = append(r.hist, float64(v)/FullScale)
 			}
 		}
 		out[i], out[i+1] = r.next()
@@ -205,38 +220,34 @@ func (r *resampler) trim() {
 	}
 }
 
-// StreamResampler converts interleaved int16 stereo from one rate to another
-// as blocks arrive, keeping its state between blocks so they join without
-// clicks. The output of a block can be a frame shorter or longer than the
-// exact ratio; the total over many blocks follows it.
-type StreamResampler struct{ r *resampler }
-
-func NewStreamResampler(from, to int) *StreamResampler {
-	return &StreamResampler{r: newResampler(from, to)}
+// fixedOutput plays a Source on a device opened at one format, converting
+// whatever the source produces. It is for outputs that do not reopen their
+// device when the stream's format changes.
+type fixedOutput struct {
+	source Source
+	out    Format
+	in     Format
+	conv   *converter
+	buf    []byte
 }
 
-// Process takes one block and returns the frames that can be produced so far.
-func (s *StreamResampler) Process(in []int16) []int16 {
-	r := s.r
-	for _, v := range in {
-		r.hist = append(r.hist, float64(v)/32768)
-	}
-	var out []int16
-	for r.ready() {
-		left, right := r.next()
-		out = append(out, toInt16(left), toInt16(right))
-	}
-	r.trim()
-	return out
+func newFixedOutput(source Source, out Format) *fixedOutput {
+	return &fixedOutput{source: source, out: out}
 }
 
-func toInt16(v float64) int16 {
-	v = math.Round(v * 32768)
-	if v > 32767 {
-		return 32767
+// read fills out with 16-bit stereo at the device rate. The times are
+// passed on to the source.
+func (f *fixedOutput) read(out []int16, currentTime, outputBufferDacTime time.Duration) {
+	if in := f.source.Format(); f.conv == nil || in != f.in {
+		f.in, f.conv = in, newConverter(f.out, "auto", in)
 	}
-	if v < -32768 {
-		return -32768
+	frames := len(out) / 2
+	if cap(f.buf) < frames*4 {
+		f.buf = make([]byte, frames*4)
 	}
-	return int16(v)
+	buf := f.buf[:frames*4]
+	f.conv.fill(buf, frames, 1, func(src []int32) { f.source.Fill(src, currentTime, outputBufferDacTime) })
+	for i := range out[:frames*2] {
+		out[i] = int16(binary.LittleEndian.Uint16(buf[i*2:]))
+	}
 }

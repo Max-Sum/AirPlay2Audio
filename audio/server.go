@@ -16,14 +16,6 @@ import (
 // A control session may set up several successive audio connections, for
 // example on a track change. Each connection owns its own decoder.
 type Server struct {
-	// Buffered streams: the timestamp mapping shared by packets and anchors,
-	// and the last anchor, mapped again when the source rate changes.
-	rtpMap     *rtpMapper
-	anchorRTP  uint32
-	anchorTime time.Time
-	anchored   bool
-	playing    bool
-
 	player        *Player
 	mu            sync.Mutex
 	generation    uint64
@@ -111,7 +103,7 @@ func (s *Server) startUDP(data, control *net.UDPConn, timing io.Closer, samplesP
 	if !s.player.synchronized {
 		// UDP cannot apply TCP backpressure. Reserve up to about one second
 		// of PCM for bursts, without forcing this delay when the queue is empty.
-		frames := int((uint64(sampleRate) + uint64(samplesPerPacket) - 1) / uint64(samplesPerPacket))
+		frames := int((uint64(cdRate) + uint64(samplesPerPacket) - 1) / uint64(samplesPerPacket))
 		if frames < 2 {
 			frames = 2
 		}
@@ -123,10 +115,9 @@ func (s *Server) startUDP(data, control *net.UDPConn, timing io.Closer, samplesP
 			s.player.ringBuffer.ResetCapacity(frames)
 			s.player.SetLowLatencyCatchUp(true)
 		}
-		log.Printf("AUDIO realtime burst capacity=%d packets (up to approximately %d ms at negotiated packet size)", frames, uint64(frames)*uint64(samplesPerPacket)*1000/uint64(sampleRate))
+		log.Printf("AUDIO realtime burst capacity=%d packets (up to approximately %d ms at negotiated packet size)", frames, uint64(frames)*uint64(samplesPerPacket)*1000/uint64(cdRate))
 	}
 	s.dataSocket, s.controlSocket, s.timing = data, control, timing
-	s.rtpMap = nil // UDP streams are 44.1 kHz; their timestamps are used as they are
 	s.gate.classic = timing != nil
 	if !active {
 		s.pauseTiming(true)
@@ -157,9 +148,7 @@ func (s *Server) startUDP(data, control *net.UDPConn, timing io.Closer, samplesP
 // format named in SETUP; each packet's SSRC selects its actual encoding.
 func (s *Server) Setup(sharedKey []byte, audioFormat uint64) (int, error) {
 	fallback := formatForAudioFormat(audioFormat)
-	mapper := newRTPMapper(fallback.rate)
-	decoder := newBufferedDecoder(fallback, mapper)
-	decoder.onRateChange = s.reanchor
+	decoder := newBufferedDecoder(fallback)
 	decoder.restart = &s.restart
 	decoder.onBytes = s.addBytes
 	decoder.onFormat = func(f bufferedFormat) {
@@ -175,7 +164,6 @@ func (s *Server) Setup(sharedKey []byte, audioFormat uint64) (int, error) {
 	}
 	key := append([]byte(nil), sharedKey...)
 	s.mu.Lock()
-	s.rtpMap = mapper
 	s.generation++
 	generation := s.generation
 	if s.done != nil {
@@ -288,39 +276,18 @@ func decodeToPcm(reader io.Reader, decoder *bufferedDecoder, sharedKey []byte) (
 	return NewFrame(decoder, sharedKey, buffer)
 }
 
+// SetRateAnchorTime starts buffered playback. The anchor's RTP time counts
+// samples at the stream's own rate; the player reads it at the rate of the
+// audio it is playing, also after the sender changes the encoding.
 func (s *Server) SetRateAnchorTime(rtpTime uint32, networkTime time.Time) {
-	s.mu.Lock()
-	s.anchorRTP, s.anchorTime, s.anchored, s.playing = rtpTime, networkTime, true, true
-	mapper := s.rtpMap
-	s.mu.Unlock()
 	if !s.Active() {
 		return
-	}
-	s.startAt(mapper, rtpTime, networkTime)
-}
-
-func (s *Server) startAt(mapper *rtpMapper, rtpTime uint32, networkTime time.Time) {
-	if mapper != nil {
-		rtpTime = mapper.Map(rtpTime)
 	}
 	s.player.ControlChannel <- globals.ControlMessage{MType: globals.START, Param1: networkTime.UnixNano(), Param2: int64(rtpTime)}
 }
 
-// reanchor maps the last anchor again after the source rate of a buffered
-// stream changed, so it stays on the same timeline as the packets.
-func (s *Server) reanchor() {
-	s.mu.Lock()
-	rtpTime, networkTime, mapper := s.anchorRTP, s.anchorTime, s.rtpMap
-	ok := s.anchored && s.playing
-	s.mu.Unlock()
-	if ok && s.Active() {
-		s.startAt(mapper, rtpTime, networkTime)
-	}
-}
-
 func (s *Server) Teardown() {
 	s.mu.Lock()
-	s.playing = false
 	s.generation++
 	if s.done != nil {
 		close(s.done)
@@ -340,9 +307,6 @@ func (s *Server) Teardown() {
 
 func (s *Server) SetRate0() {
 	s.restart.Add(1)
-	s.mu.Lock()
-	s.playing = false
-	s.mu.Unlock()
 	if s.Active() {
 		s.player.ControlChannel <- globals.ControlMessage{MType: globals.PAUSE}
 	}
@@ -384,7 +348,6 @@ func (s *Server) Flush(fromSeq, untilSeq uint64) {
 func (s *Server) FlushImmediate(untilSeq uint64) {
 	s.restart.Add(1)
 	s.mu.Lock()
-	s.playing = false
 	if !s.Active() {
 		s.gate.flushes = append(s.gate.flushes[:0], flushRequest{immediate: true, until: uint32(untilSeq) & SeqMask})
 		s.mu.Unlock()

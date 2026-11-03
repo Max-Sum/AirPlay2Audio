@@ -12,10 +12,9 @@ import (
 )
 
 const (
-	waveSourceFrames = 512 // player block, 44.1 kHz
-	waveBuffers      = 5   // ~58 ms, providing room for Windows scheduling jitter
-	waveHeaderDone   = 1
-	waveMapper       = 0xffffffff
+	waveBuffers    = 5 // ~58 ms, providing room for Windows scheduling jitter
+	waveHeaderDone = 1
+	waveMapper     = 0xffffffff
 )
 
 var (
@@ -117,7 +116,9 @@ type WaveOutStream struct {
 	frameBytes          int
 	buffers             []waveBuffer
 	converter           *converter
-	callback            StreamCallback
+	source              Source
+	input               Format // what the player produces
+	format              Format // what the device was opened with
 	*softVolume
 	mu         sync.Mutex
 	stop, done chan struct{}
@@ -134,8 +135,8 @@ func waveError(operation string, code uintptr) error {
 	return fmt.Errorf("%s: Windows audio error %d", operation, code)
 }
 
-func (s *WaveOutStream) Init(callback StreamCallback) error {
-	s.callback = callback
+func (s *WaveOutStream) Init(source Source) error {
+	s.source = source
 	s.config = Output
 	if err := s.config.Validate(); err != nil {
 		return err
@@ -168,16 +169,19 @@ func (s *WaveOutStream) open() error {
 		}
 		id, name = uintptr(device.Index), device.Name
 	}
-	s.frameBytes = 2 * s.config.Bits / 8
-	format := pcmFormat(s.config.Rate, s.config.Bits)
+	in := s.source.Format()
+	out := s.config.Resolve(in)
+	s.frameBytes = 2 * out.Bits / 8
+	format := pcmFormat(out.Rate, out.Bits)
 	code, _, _ := waveOpen.Call(uintptr(unsafe.Pointer(&s.device)), id, uintptr(unsafe.Pointer(&format)), s.event, 0, 0x50000) // CALLBACK_EVENT
-	if err := waveError(fmt.Sprintf("open output %q at %d Hz %d-bit", name, s.config.Rate, s.config.Bits), code); err != nil {
+	if err := waveError(fmt.Sprintf("open output %q at %d Hz %d-bit", name, out.Rate, out.Bits), code); err != nil {
 		s.device = 0
 		return err
 	}
 	// Keep the buffer duration (and so the queue depth) independent of rate.
-	s.frames = waveSourceFrames * s.config.Rate / SourceRate
-	s.converter = newConverter(s.config, waveSourceFrames)
+	s.frames = blockFrames(out.Rate)
+	s.input, s.format = in, out
+	s.converter = newConverter(out, s.config.Dither, in)
 	for i := 0; i < waveBuffers; i++ {
 		size := uintptr(s.frames * s.frameBytes)
 		h, _, _ := heapAlloc.Call(s.heap, 8, unsafe.Sizeof(waveHeader{}))
@@ -203,7 +207,7 @@ func (s *WaveOutStream) open() error {
 		}
 		s.buffers = append(s.buffers, waveBuffer{header: header, memory: mem})
 	}
-	log.Printf("AUDIO output device=%q format=%d Hz %d-bit dither=%s", name, s.config.Rate, s.config.Bits, s.config.Dither)
+	log.Printf("AUDIO output device=%q format=%d Hz %d-bit (stream %d Hz %d-bit) dither=%s", name, out.Rate, out.Bits, in.Rate, in.Bits, s.config.Dither)
 	return nil
 }
 
@@ -228,8 +232,8 @@ func (s *WaveOutStream) Start() error {
 
 func (s *WaveOutStream) run(stop <-chan struct{}, done chan<- struct{}) {
 	defer close(done)
-	defer waveReset.Call(s.device)
-	rate := uint64(s.config.Rate)
+	defer func() { waveReset.Call(s.device) }() // the device can be reopened below
+	rate := uint64(s.format.Rate)
 	var written uint64
 	for {
 		select {
@@ -237,10 +241,27 @@ func (s *WaveOutStream) run(stop <-chan struct{}, done chan<- struct{}) {
 			return
 		default:
 		}
+	buffers:
 		for i := range s.buffers {
 			b := &s.buffers[i]
 			if b.queued && b.header.Flags&waveHeaderDone == 0 {
 				continue
+			}
+			if in := s.source.Format(); in != s.input {
+				if s.config.Resolve(in) == s.format {
+					log.Printf("AUDIO stream format changed to %d Hz %d-bit; output stays %d Hz %d-bit", in.Rate, in.Bits, s.format.Rate, s.format.Bits)
+					s.input, s.converter = in, newConverter(s.format, s.config.Dither, in)
+				} else {
+					log.Printf("AUDIO stream format changed to %d Hz %d-bit; reopening output", in.Rate, in.Bits)
+					waveReset.Call(s.device)
+					s.closeDevice()
+					if err := s.open(); err != nil {
+						log.Printf("AUDIO cannot reopen waveOut output: %v", err)
+						return
+					}
+					rate, written = uint64(s.format.Rate), 0
+					break buffers
+				}
 			}
 			b.queued = false
 			pos := multimediaTime{Kind: 2} // TIME_SAMPLES, per channel
@@ -265,11 +286,11 @@ func (s *WaveOutStream) run(stop <-chan struct{}, done chan<- struct{}) {
 			}
 			out := unsafe.Slice((*byte)(unsafe.Pointer(b.memory)), s.frames*s.frameBytes)
 			ahead := time.Duration(queued) * time.Second / time.Duration(rate)
-			s.converter.fill(out, s.frames, s.gain(), func(src []int16) {
+			s.converter.fill(out, s.frames, s.gain(), func(src []int32) {
 				// Audio taken now plays after what is queued at the device and
 				// what the resampler still holds.
-				pending := time.Duration(s.converter.pendingSourceFrames() * float64(time.Second) / SourceRate)
-				s.callback(src, 0, ahead+pending)
+				pending := time.Duration(s.converter.pendingSourceFrames() * float64(time.Second) / float64(s.input.Rate))
+				s.source.Fill(src, 0, ahead+pending)
 			})
 			code, _, _ = waveWrite.Call(s.device, uintptr(unsafe.Pointer(b.header)), unsafe.Sizeof(waveHeader{}))
 			if err := waveError("write audio", code); err != nil {

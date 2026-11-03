@@ -1,10 +1,8 @@
 package audio
 
 import (
-	"encoding/binary"
 	"fmt"
 	"log"
-	"sync"
 	"sync/atomic"
 
 	alac "github.com/mycophonic/saprobe-alac"
@@ -80,8 +78,7 @@ const (
 )
 
 // formatForAudioFormat returns the encoding named by a SETUP audioFormat
-// bit. It is used for packets whose SSRC names no known encoding, and to
-// interpret anchors that arrive before the first packet.
+// bit. It is used for packets whose SSRC names no known encoding.
 func formatForAudioFormat(audioFormat uint64) bufferedFormat {
 	switch audioFormat {
 	case audioFormatAAC48000:
@@ -114,73 +111,29 @@ func aacConfig(f bufferedFormat) []byte {
 	return []byte{0x12, 0x10} // 44100 Hz stereo
 }
 
-// rtpMapper converts a stream's RTP timestamps to the player's 44.1 kHz
-// timeline. At 44.1 kHz it changes nothing. At another rate it extends the
-// 32-bit timestamps to 64 bits, so the converted values stay continuous
-// across the 32-bit wrap, and scales them. Anchors and packets of one stream
-// go through the same mapper, so they stay consistent.
-type rtpMapper struct {
-	mu      sync.Mutex
-	rate    int
-	have    bool
-	lastTS  uint32
-	lastExt int64
+// pcmFormat is the format of the decoded audio: AAC decodes to 16 bits.
+func (f bufferedFormat) pcmFormat() codec.Format {
+	bits := 16
+	if f.alac {
+		bits = int(f.bits)
+	}
+	return codec.Format{Rate: f.rate, Bits: bits}
 }
 
-func newRTPMapper(rate int) *rtpMapper { return &rtpMapper{rate: rate} }
-
-// setRate changes the source rate and reports whether it changed; the
-// mapping then starts again from the next timestamp.
-func (m *rtpMapper) setRate(rate int) bool {
-	m.mu.Lock()
-	defer m.mu.Unlock()
-	if rate == m.rate {
-		return false
-	}
-	m.rate, m.have = rate, false
-	return true
-}
-
-func (m *rtpMapper) Map(ts uint32) uint32 {
-	m.mu.Lock()
-	defer m.mu.Unlock()
-	if m.rate == 0 || m.rate == int(sampleRate) {
-		return ts
-	}
-	if !m.have {
-		m.have, m.lastTS, m.lastExt = true, ts, int64(ts)
-	}
-	ext := m.lastExt + int64(int32(ts-m.lastTS))
-	m.lastTS, m.lastExt = ts, ext
-	scaled := ext * sampleRate
-	quotient := scaled / int64(m.rate)
-	if scaled%int64(m.rate) != 0 && scaled < 0 {
-		quotient-- // floor, so negative values map continuously too
-	}
-	return uint32(quotient)
-}
-
-// bufferedDecoder decodes buffered packets according to their SSRC and
-// converts them to the player's 44.1 kHz 16-bit stereo.
+// bufferedDecoder decodes buffered packets according to their SSRC. Frames
+// keep the stream's own rate and sample size.
 type bufferedDecoder struct {
 	fallback bufferedFormat
-	mapper   *rtpMapper
-	// onRateChange is called after the source rate changed, before the
-	// packet is mapped, so the stream can map its anchor again.
-	onRateChange func()
 	// onFormat is called when the encoding is first seen or changes; onBytes
 	// with the size of each compressed payload. Both are optional.
 	onFormat func(bufferedFormat)
 	onBytes  func(int)
 
-	format    bufferedFormat
-	ready     bool
-	aac       *codec.AacDecoder
-	alac      *alac.PacketDecoder
-	resampler *codec.StreamResampler
-	next      uint32 // player timestamp following the last resampled frame
-	haveNext  bool
-	reported  map[uint32]bool
+	format   bufferedFormat
+	ready    bool
+	aac      *codec.AacDecoder
+	alac     *alac.PacketDecoder
+	reported map[uint32]bool
 
 	// pending holds the packets whose AAC audio the decoder has not output
 	// yet, oldest first. The Windows decoder outputs each access unit one
@@ -213,8 +166,8 @@ func (d *bufferedDecoder) mute(timestamp uint32, samples int) bool {
 // expected.
 const maxPendingAAC = 4
 
-func newBufferedDecoder(fallback bufferedFormat, mapper *rtpMapper) *bufferedDecoder {
-	return &bufferedDecoder{fallback: fallback, mapper: mapper, reported: map[uint32]bool{}}
+func newBufferedDecoder(fallback bufferedFormat) *bufferedDecoder {
+	return &bufferedDecoder{fallback: fallback, reported: map[uint32]bool{}}
 }
 
 func (d *bufferedDecoder) Close() {
@@ -238,7 +191,7 @@ func (d *bufferedDecoder) formatFor(ssrc uint32) bufferedFormat {
 
 func (d *bufferedDecoder) switchTo(f bufferedFormat) error {
 	d.Close()
-	d.alac, d.resampler, d.haveNext, d.haveExpect, d.pending = nil, nil, false, false, nil
+	d.alac, d.haveExpect, d.pending = nil, false, nil
 	if f.alac {
 		decoder, err := alac.NewPacketDecoder(alac.PacketConfig{
 			FrameLength: 352, BitDepth: f.bits, NumChannels: 2,
@@ -270,9 +223,6 @@ func (d *bufferedDecoder) switchTo(f bufferedFormat) error {
 	d.format, d.ready = f, true
 	if d.onFormat != nil {
 		d.onFormat(f)
-	}
-	if d.mapper != nil && d.mapper.setRate(f.rate) && d.onRateChange != nil {
-		d.onRateChange()
 	}
 	return nil
 }
@@ -316,77 +266,16 @@ func (d *bufferedDecoder) decode(packet TcpPacket, payload []byte) (*PCMFrame, e
 	if err != nil || len(pcm) == 0 {
 		return nil, err
 	}
+	format := f.pcmFormat()
+	var samples []int32
+	if format.Bits == 24 {
+		samples = pcm24(pcm)
+	} else {
+		samples = pcm16(pcm)
+	}
 	aac := !f.alac
-	if aac && d.mute(packet.Timestamp, len(pcm)/4) {
-		clear(pcm)
+	if aac && d.mute(packet.Timestamp, len(samples)/2) {
+		clear(samples)
 	}
-	if f.rate == int(sampleRate) && (!f.alac || f.bits == 16) {
-		// Already the player's format and timeline: the common path.
-		return &PCMFrame{TcpPacket: packet, pcmData: pcm, aac: aac}, nil
-	}
-	samples := toStereo16(pcm, f)
-	if f.rate == int(sampleRate) {
-		return &PCMFrame{TcpPacket: packet, pcmData: int16Bytes(samples), aac: aac}, nil
-	}
-	frame := d.resample(packet, samples)
-	if frame != nil {
-		frame.aac = aac
-	}
-	return frame, nil
-}
-
-// resample converts a block to 44.1 kHz. Output timestamps follow on from
-// the previous block, so consecutive blocks join exactly; a jump in the
-// source timestamps (seek, gap) restarts the resampler at the new position.
-func (d *bufferedDecoder) resample(packet TcpPacket, samples []int16) *PCMFrame {
-	mapped := d.mapper.Map(packet.Timestamp)
-	if !d.haveNext || abs32(int32(mapped-d.next)) > 64 {
-		d.resampler = codec.NewStreamResampler(d.format.rate, int(sampleRate))
-		d.next, d.haveNext = mapped, true
-	}
-	out := d.resampler.Process(samples)
-	packet.Timestamp = d.next
-	d.next += uint32(len(out) / 2)
-	if len(out) == 0 {
-		return nil
-	}
-	return &PCMFrame{TcpPacket: packet, pcmData: int16Bytes(out)}
-}
-
-// toStereo16 reads decoded interleaved stereo as int16, rounding 24-bit
-// samples.
-func toStereo16(pcm []byte, f bufferedFormat) []int16 {
-	if !f.alac || f.bits == 16 {
-		out := make([]int16, len(pcm)/2)
-		for i := range out {
-			out[i] = int16(binary.LittleEndian.Uint16(pcm[i*2:]))
-		}
-		return out
-	}
-	out := make([]int16, len(pcm)/3)
-	for i := range out {
-		b := pcm[i*3:]
-		v := int32(b[0]) | int32(b[1])<<8 | int32(int8(b[2]))<<16
-		v = (v + 128) >> 8
-		if v > 32767 {
-			v = 32767
-		}
-		out[i] = int16(v)
-	}
-	return out
-}
-
-func int16Bytes(samples []int16) []byte {
-	out := make([]byte, len(samples)*2)
-	for i, v := range samples {
-		binary.LittleEndian.PutUint16(out[i*2:], uint16(v))
-	}
-	return out
-}
-
-func abs32(v int32) int32 {
-	if v < 0 {
-		return -v
-	}
-	return v
+	return &PCMFrame{TcpPacket: packet, samples: samples, format: format, aac: aac}, nil
 }

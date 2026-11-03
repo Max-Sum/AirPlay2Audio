@@ -16,13 +16,15 @@ func NewStream() Stream {
 	return &PortAudioStream{}
 }
 
-func (s *PortAudioStream) Init(callBack StreamCallback) error {
+func (s *PortAudioStream) Init(source Source) error {
 	var err error
 	if err = portaudio.Initialize(); err != nil {
 		return err
 	}
+	// The device stays at 44.1 kHz 16-bit; other formats are converted.
+	fixed := newFixedOutput(source, Format{Rate: 44100, Bits: 16})
 	portAudioCallback := func(out []int16, info portaudio.StreamCallbackTimeInfo) {
-		callBack(out, info.CurrentTime, info.OutputBufferDacTime)
+		fixed.read(out, info.CurrentTime, info.OutputBufferDacTime)
 	}
 	//TODO : get the framePerBuffer from setup
 	s.stream, err = portaudio.OpenDefaultStream(0, 2, 44100, 1024, portAudioCallback)

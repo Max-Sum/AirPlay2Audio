@@ -104,10 +104,10 @@ func TestRealtimeUDPDecryptDecodeAndAnchor(t *testing.T) {
 	for time.Now().Before(deadline) {
 		if value, err := player.ringBuffer.TryPop(); err == nil {
 			frame := value.(*PCMFrame)
-			if frame.Timestamp != 123456 || len(frame.Data()) != 352*4 {
+			if frame.Timestamp != 123456 || len(frame.Data()) != 352*2 {
 				t.Fatalf("bad ALAC output length or timestamp")
 			}
-			if binary.LittleEndian.Uint16(frame.Data()[0:2]) != 0 || binary.LittleEndian.Uint16(frame.Data()[2:4]) != 1000 {
+			if frame.Data()[0] != 0 || frame.Data()[1] != 1000<<16 {
 				t.Fatal("decoded channel samples differ")
 			}
 			return

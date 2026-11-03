@@ -48,7 +48,7 @@ func TestBufferedDecoderDownmixesSurround(t *testing.T) {
 	} {
 		t.Run(test.fixture, func(t *testing.T) {
 			packets := readAACFixture(t, test.fixture)
-			d := newBufferedDecoder(formatAAC44100, newRTPMapper(48000))
+			d := newBufferedDecoder(formatAAC44100)
 			defer d.Close()
 			var peak int16
 			decoded := 0
@@ -65,8 +65,8 @@ func TestBufferedDecoderDownmixesSurround(t *testing.T) {
 				if !frame.aac {
 					t.Fatal("decoded surround frame not marked as AAC")
 				}
-				for j := 0; j+1 < len(frame.pcmData); j += 2 {
-					if v := int16(uint16(frame.pcmData[j]) | uint16(frame.pcmData[j+1])<<8); v > peak {
+				for _, s := range frame.samples {
+					if v := int16(s >> 16); v > peak {
 						peak = v
 					}
 				}
@@ -84,7 +84,7 @@ func TestBuffered71IsSkippedOnWindows(t *testing.T) {
 	if SupportedBufferedFormat(audioFormatAAC48000x71) {
 		t.Fatal("7.1 advertised")
 	}
-	d := newBufferedDecoder(formatAAC44100, newRTPMapper(48000))
+	d := newBufferedDecoder(formatAAC44100)
 	defer d.Close()
 	for i, payload := range readAACFixture(t, "sine-aac-lc-7.1.bin") {
 		packet := TcpPacket{Packet: rtp.Packet{Header: rtp.Header{SSRC: ssrcAAC48000x71, Timestamp: uint32(i * 1024)}}}

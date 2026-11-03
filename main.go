@@ -168,9 +168,9 @@ func parseFlags() (*options, error) {
 	// Output.
 	flag.StringVar(&codec.Output.Device, "output-device", "", "output device: index or part of the name from -list-devices; empty uses the Windows default device")
 	flag.BoolVar(&o.listDevices, "list-devices", false, "list output devices and exit")
-	flag.IntVar(&codec.Output.Bits, "output-bits", 16, "output sample size: 16, 24 or 32")
-	flag.IntVar(&codec.Output.Rate, "output-rate", 44100, "output sample rate: 44100, 48000, 88200, 96000, 176400 or 192000")
-	flag.StringVar(&codec.Output.Dither, "dither", "auto", "dither: auto (16-bit output with volume or rate conversion), on or off")
+	flag.IntVar(&codec.Output.Bits, "output-bits", 0, "output sample size: 16, 24 or 32; 0 follows the stream (16, or 24 for 24-bit lossless)")
+	flag.IntVar(&codec.Output.Rate, "output-rate", 0, "output sample rate: 44100, 48000, 88200, 96000, 176400 or 192000; 0 follows the stream")
+	flag.StringVar(&codec.Output.Dither, "dither", "auto", "dither: auto (16-bit output with volume or rate conversion, or of 24-bit audio), on or off")
 	flag.StringVar(&codec.Output.API, "output-api", "wasapi", "Windows output: wasapi (lower delay; falls back to waveout if it cannot open) or waveout")
 	flag.IntVar(&codec.Output.BufferMs, "output-buffer", codec.DefaultBufferMs, "milliseconds of audio WASAPI keeps queued at the device; lower is less delay, too low can crackle on a busy computer")
 	flag.Float64Var(&o.volumeRange, "volume-range", audio.DefaultVolumeRange, "attenuation in dB at the sender's lowest volume step (shairport-sync's volume_range_db)")
