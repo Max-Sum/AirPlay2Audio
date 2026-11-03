@@ -91,20 +91,41 @@ func TestRemoteControlStreamIsAcknowledged(t *testing.T) {
 	}
 }
 
-// Realtime audio is decoded at 44.1 kHz only; another rate is refused rather
-// than played at the wrong speed.
+// A realtime stream whose rate contradicts its format, or in a format this
+// receiver does not decode, is refused rather than played at the wrong speed.
 func TestRealtimeSetupRefusesOtherRates(t *testing.T) {
+	r, conn := setupHandler(t)
+	if response, _ := r.OnSetupWeb(conn, setupRequest(t, "s", map[string]interface{}{"name": "Phone", "timingProtocol": "PTP"})); response.StatusCode != rtsp.StatusOK {
+		t.Fatalf("session setup: %+v", response)
+	}
+	for _, stream := range []map[string]interface{}{
+		{"audioFormat": uint64(0x40000), "sr": uint64(48000)},  // ALAC 44.1 kHz named, 48 kHz given
+		{"audioFormat": uint64(0x400000), "sr": uint64(44100)}, // AAC
+	} {
+		stream["type"], stream["spf"], stream["shk"] = uint64(streamRealtime), uint64(352), make([]byte, 32)
+		response, _ := r.OnSetupWeb(conn, setupRequest(t, "s", map[string]interface{}{"streams": []interface{}{stream}}))
+		if response.StatusCode != rtsp.StatusBadRequest {
+			t.Fatalf("realtime stream %#x at %d Hz: status %d", stream["audioFormat"], stream["sr"], response.StatusCode)
+		}
+	}
+}
+
+// Realtime ALAC at 48 kHz 24-bit is accepted.
+func TestRealtimeSetupAccepts48kHz24Bit(t *testing.T) {
 	r, conn := setupHandler(t)
 	if response, _ := r.OnSetupWeb(conn, setupRequest(t, "s", map[string]interface{}{"name": "Phone", "timingProtocol": "PTP"})); response.StatusCode != rtsp.StatusOK {
 		t.Fatalf("session setup: %+v", response)
 	}
 	response, _ := r.OnSetupWeb(conn, setupRequest(t, "s", map[string]interface{}{
 		"streams": []interface{}{map[string]interface{}{
-			"type": uint64(streamRealtime), "audioFormat": uint64(0x40000), "sr": uint64(48000), "spf": uint64(352), "shk": make([]byte, 32),
+			"type": uint64(streamRealtime), "audioFormat": uint64(1 << 21), "sr": uint64(48000), "spf": uint64(352), "shk": make([]byte, 32),
 		}},
 	}))
-	if response.StatusCode != rtsp.StatusBadRequest {
-		t.Fatalf("48 kHz realtime stream: status %d", response.StatusCode)
+	if response.StatusCode != rtsp.StatusOK {
+		t.Fatalf("48 kHz 24-bit realtime stream: status %d", response.StatusCode)
+	}
+	if s := r.streams["s"]; s != nil {
+		s.Teardown()
 	}
 }
 

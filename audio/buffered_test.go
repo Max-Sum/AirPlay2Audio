@@ -10,14 +10,14 @@ import (
 
 func TestRealtimeAnchorModes(t *testing.T) {
 	frame1, frame2 := uint32(100000), uint32(100000+77175)
-	if got := realtimeAnchorStamp(frame1, frame2, AnchorShairport); got != frame1-11025 {
+	if got := realtimeAnchorStamp(frame1, frame2, AnchorShairport, 44100); got != frame1-11025 {
 		t.Fatalf("shairport mode = %d, want frame_1 - 11025", got)
 	}
-	if got := realtimeAnchorStamp(frame1, frame2, AnchorLowLatency); got != frame2-11025 {
+	if got := realtimeAnchorStamp(frame1, frame2, AnchorLowLatency, 44100); got != frame2-11025 {
 		t.Fatalf("low-latency mode = %d, want frame_2 - 11025", got)
 	}
 	// An implausible latency is ignored in low-latency mode.
-	if got := realtimeAnchorStamp(frame1, frame1-5, AnchorLowLatency); got != frame1-11025 {
+	if got := realtimeAnchorStamp(frame1, frame1-5, AnchorLowLatency, 44100); got != frame1-11025 {
 		t.Fatalf("negative latency = %d", got)
 	}
 	if _, err := ParseRealtimeAnchor("video"); err == nil {

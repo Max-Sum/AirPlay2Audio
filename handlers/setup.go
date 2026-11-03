@@ -138,15 +138,16 @@ func (r *Rstp) OnSetupWeb(conn *rtsp.Conn, req *rtsp.Request) (*rtsp.Response, e
 					if spf == 0 {
 						spf = 352
 					}
-					if stream.AudioFormat != 0 && stream.AudioFormat != 0x40000 || stream.SampleRate != 0 && stream.SampleRate != 44100 || spf > 4096 {
-						log.Printf("Unsupported realtime stream: format=%#x rate=%d samples=%d (ALAC 44100 Hz 16-bit stereo only)", stream.AudioFormat, stream.SampleRate, stream.Spf)
+					format, ok := audio.RealtimeFormatFor(stream.AudioFormat, stream.SampleRate)
+					if !ok || spf > 4096 {
+						log.Printf("Unsupported realtime stream: format=%#x rate=%d samples=%d (ALAC stereo at 44100 or 48000 Hz, 16 or 24-bit only)", stream.AudioFormat, stream.SampleRate, stream.Spf)
 						return &rtsp.Response{StatusCode: rtsp.StatusBadRequest}, nil
 					}
-					log.Printf("AUDIO realtime ALAC setup: format=%#x samples=%d", stream.AudioFormat, spf)
+					log.Printf("AUDIO realtime ALAC setup: format=%#x %d Hz %d-bit samples=%d", stream.AudioFormat, format.Rate, format.Bits, spf)
 					// A realtime sender sets up its stream when it starts or
 					// resumes playing.
 					r.startPlaying(conn)
-					port, controlPort, err = s.SetupRealtime(stream.SharedKey[:], spf)
+					port, controlPort, err = s.SetupRealtime(stream.SharedKey[:], spf, format)
 					if err == nil {
 						log.Printf("AUDIO realtime ports given to %s: data=%d control=%d", remoteHost(conn), port, controlPort)
 					}

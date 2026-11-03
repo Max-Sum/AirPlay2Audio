@@ -29,15 +29,20 @@ func (w *testBitWriter) put(value uint64, count uint) {
 	}
 }
 
-func testALACPacket(key []byte) ([]byte, error) {
+func testALACPacket(key []byte) ([]byte, error) { return testALACPacketBits(key, 16) }
+
+// testALACPacketBits builds an encrypted realtime packet holding 352
+// uncompressed stereo ALAC frames of the given sample size: left i, right
+// 1000+i.
+func testALACPacketBits(key []byte, bits uint) ([]byte, error) {
 	w := &testBitWriter{}
 	w.put(1, 3)
 	w.put(0, 4)
 	w.put(0, 12)
 	w.put(1, 4) // stereo, escape/uncompressed
 	for i := 0; i < 352; i++ {
-		w.put(uint64(uint16(i)), 16)
-		w.put(uint64(uint16(1000+i)), 16)
+		w.put(uint64(i), bits)
+		w.put(uint64(1000+i), bits)
 	}
 	header := make([]byte, 12)
 	header[0], header[1], header[3] = 0x80, 96, 9
@@ -58,7 +63,7 @@ func TestRealtimeUDPDecryptDecodeAndAnchor(t *testing.T) {
 		t.Fatal(err)
 	}
 	key := make([]byte, 32)
-	dataPort, controlPort, err := server.SetupRealtime(key, 352)
+	dataPort, controlPort, err := server.SetupRealtime(key, 352, CDRealtime)
 	if err != nil {
 		t.Fatal(err)
 	}
@@ -121,7 +126,7 @@ func TestRealtimeUDPReordersAuthenticatedPackets(t *testing.T) {
 	player := NewPlayer(ptp.NewVirtualClock(0), NewRing(10))
 	server, _ := NewServer(player)
 	key := make([]byte, 32)
-	port, _, err := server.SetupRealtime(key, 352)
+	port, _, err := server.SetupRealtime(key, 352, CDRealtime)
 	if err != nil {
 		t.Fatal(err)
 	}
@@ -159,7 +164,7 @@ func TestRealtimeUDPRequestsAndAcceptsResentPacket(t *testing.T) {
 	player := NewPlayer(ptp.NewVirtualClock(0), NewRing(10))
 	server, _ := NewServer(player)
 	key := make([]byte, 32)
-	dataPort, controlPort, err := server.SetupRealtime(key, 352)
+	dataPort, controlPort, err := server.SetupRealtime(key, 352, CDRealtime)
 	if err != nil {
 		t.Fatal(err)
 	}
@@ -234,7 +239,7 @@ func TestLowLatencyQueueChangesOnlyForRealtimeSession(t *testing.T) {
 	}
 	defer server.Teardown()
 	for i := 0; i < 3; i++ {
-		port, _, err := server.SetupRealtime(key, 352)
+		port, _, err := server.SetupRealtime(key, 352, CDRealtime)
 		if err != nil {
 			t.Fatal(err)
 		}

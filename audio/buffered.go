@@ -60,6 +60,8 @@ var bufferedFormats = map[uint32]bufferedFormat{
 // SETUP audioFormat bits (also used in /info supportedFormats).
 const (
 	audioFormatALAC44100S16 = 1 << 18
+	audioFormatALAC44100S24 = 1 << 19
+	audioFormatALAC48000S16 = 1 << 20
 	audioFormatALAC48000S24 = 1 << 21
 	audioFormatAAC44100     = 1 << 22
 	audioFormatAAC48000     = 1 << 23
@@ -67,12 +69,14 @@ const (
 	audioFormatAAC48000x71  = 1 << 40
 )
 
-// RealtimeFormats and BufferedFormats are the formats advertised in /info,
-// as shairport-sync advertises them: realtime ALAC 44.1 kHz; buffered AAC at
-// 44.1 and 48 kHz, lossless ALAC 48 kHz 24-bit, and AAC 5.1 and, where the
-// AAC decoder supports it, 7.1.
+// RealtimeFormats and BufferedFormats are the formats advertised in /info:
+// realtime ALAC stereo at 44.1 or 48 kHz, 16 or 24-bit (shairport-sync
+// advertises only 44.1 kHz 16-bit here); buffered AAC at 44.1 and 48 kHz,
+// lossless ALAC 48 kHz 24-bit, and AAC 5.1 and, where the AAC decoder
+// supports it, 7.1.
 const (
-	RealtimeFormats uint64 = audioFormatALAC44100S16
+	RealtimeFormats uint64 = audioFormatALAC44100S16 | audioFormatALAC44100S24 |
+		audioFormatALAC48000S16 | audioFormatALAC48000S24
 	BufferedFormats uint64 = audioFormatAAC44100 | audioFormatAAC48000 | audioFormatALAC48000S24 |
 		audioFormatAAC48000x51 | audioFormat71
 )

@@ -72,7 +72,7 @@ func (s *Server) SetupClassic(format ClassicFormat, peer ClassicPeer) (int, int,
 		clock.Reset()
 	}
 	timing := ntp.Start(timingConn, &net.UDPAddr{IP: peer.Addr.IP, Zone: peer.Addr.Zone, Port: peer.TimingPort}, clock)
-	done, finish := s.startUDP(data, control, timing, format.SamplesPerPacket(), "AUDIO AirPlay 1 connection closed")
+	done, finish := s.startUDP(data, control, timing, format.SamplesPerPacket(), cdRate, "AUDIO AirPlay 1 connection closed")
 	s.describe("classic", format.Codec)
 	s.noteFormat(cdRate, 16)
 	link := &realtimeControlLink{conn: control, resent: make(chan realtimeDatagram, 64)}
