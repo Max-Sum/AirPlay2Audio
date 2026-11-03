@@ -58,10 +58,14 @@ type Player struct {
 	// a bit rate. bytesAt is when it was last read (guarded by statsMu).
 	audioBytes atomic.Uint64
 	bytesAt    time.Time
-	// statsMu serializes Monitor and Statistics; unlogged holds what Monitor
-	// took since the last Statistics line.
+	// statsMu serializes Monitor and Statistics. Each count reaches both:
+	// unlogged holds what Monitor took since the last Statistics line.
 	statsMu  sync.Mutex
 	unlogged period
+	// unmonitored holds what Statistics took before Monitor saw it, so a
+	// log line does not leave the monitor with an empty second.
+	unmonitored period
+	monitored   bool
 
 	// Active state, as shairport-sync's sessioncontrol: the device is kept
 	// open for activeTimeout after playback stops, then released.
