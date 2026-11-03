@@ -63,6 +63,7 @@ AirPlay2Engine.exe -n "客厅" -output-device 2 -statistics
 | `-sync` | `true` | 按发送端时钟播放。`-sync=false` 收到音频就播放，不做同步 |
 | `-realtime-anchor` | `shairport` | AirPlay 2 实时流的定时方式，`shairport` 或 `low-latency`。见[同步与延迟](#同步与延迟) |
 | `-delay` | `0` | 额外的输出延迟补偿，单位毫秒，范围 -500 到 500 |
+| `-output-latency` | `0` | 向发送端报告的链路延迟，单位毫秒，范围 0 到 10000 |
 | `-drift-correction` | `true` | 通过增减单个采样校正时钟漂移 |
 | `-drift-tolerance` | `2` | 开始漂移校正前允许的误差，单位毫秒 |
 | `-resync-threshold` | `50` | 误差超过这个值时直接跳过或补静音，单位毫秒 |

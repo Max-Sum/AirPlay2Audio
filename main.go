@@ -175,6 +175,7 @@ func parseFlags() (*options, error) {
 
 	// Synchronization.
 	flag.StringVar(&o.realtimeAnchor, "realtime-anchor", "shairport", "AirPlay 2 realtime stream timing: shairport (in step with other AirPlay receivers, as shairport-sync) or low-latency (about 1.75 s earlier; suits video on the sender, not multi-room)")
+	flag.IntVar(&handlers.OutputLatencyMs, "output-latency", 0, "link latency in milliseconds reported to the sender (outputLatencyMicros in /info)")
 	flag.BoolVar(&o.driftCorrection, "drift-correction", true, "correct clock drift by adding or removing single samples")
 	flag.Float64Var(&o.driftTolerance, "drift-tolerance", 2, "timing error in milliseconds allowed before drift correction")
 	flag.Float64Var(&o.resyncThreshold, "resync-threshold", 50, "timing error in milliseconds that makes playback jump instead of correcting")
@@ -192,6 +193,9 @@ func parseFlags() (*options, error) {
 
 	if o.delay < -500 || o.delay > 500 {
 		return nil, fmt.Errorf("delay must be between -500 and 500 ms")
+	}
+	if handlers.OutputLatencyMs < 0 || handlers.OutputLatencyMs > 10000 {
+		return nil, fmt.Errorf("output-latency must be between 0 and 10000 ms")
 	}
 	for _, p := range []struct {
 		name  string

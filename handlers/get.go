@@ -20,6 +20,9 @@ type audioLatenciesResponse struct {
 	Type                uint64 `plist:"type"`
 }
 
+// OutputLatencyMs is the link latency reported to senders in /info.
+var OutputLatencyMs int
+
 type getInfoResponse struct {
 	AudioLatencies    []audioLatenciesResponse `plist:"audioLatencies"`
 	DeviceId          string                   `plist:"deviceID"`
@@ -45,7 +48,7 @@ func NewGetInfoResponse(deviceId string, features uint64, pi string,
 
 	latencies := [1]audioLatenciesResponse{{
 		InputLatencyMicros:  0,
-		OutputLatencyMicros: 400000,
+		OutputLatencyMicros: uint64(OutputLatencyMs) * 1000,
 		Type:                100,
 	}}
 
