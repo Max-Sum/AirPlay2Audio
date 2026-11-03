@@ -4,13 +4,23 @@ import (
 	"encoding/binary"
 	"math"
 	"testing"
+	"time"
 )
 
+var cd = Format{Rate: 44100, Bits: 16}
+
+// s16 is a 16-bit sample as the player carries it.
+func s16(v int16) int32 { return int32(v) << 16 }
+
 func TestConverterIsBitExactAtUnityGain(t *testing.T) {
-	c := newConverter(OutputConfig{Bits: 16, Rate: SourceRate, Dither: "auto"}, 4)
+	c := newConverter(cd, "auto", cd)
 	out := make([]byte, 4*4)
-	c.fill(out, 4, 1, func(src []int16) { copy(src, []int16{1, -1, 32767, -32768, 0, 5, -5, 100}) })
 	want := []int16{1, -1, 32767, -32768, 0, 5, -5, 100}
+	c.fill(out, 4, 1, func(src []int32) {
+		for i, v := range want {
+			src[i] = s16(v)
+		}
+	})
 	for i, w := range want {
 		if got := int16(binary.LittleEndian.Uint16(out[i*2:])); got != w {
 			t.Fatalf("sample %d = %d, want %d", i, got, w)
@@ -18,11 +28,30 @@ func TestConverterIsBitExactAtUnityGain(t *testing.T) {
 	}
 }
 
+// 24-bit audio written as 24-bit keeps every bit, without dither.
+func TestConverterKeeps24BitSamples(t *testing.T) {
+	f := Format{Rate: 48000, Bits: 24}
+	c := newConverter(f, "auto", f)
+	want := []int32{1, -1, 0x7fffff, -0x800000}
+	out := make([]byte, 2*3*2)
+	c.fill(out, 2, 1, func(src []int32) {
+		for i, v := range want {
+			src[i] = v << 8
+		}
+	})
+	for i, w := range want {
+		b := out[i*3:]
+		if got := int32(uint32(b[0])<<8|uint32(b[1])<<16|uint32(b[2])<<24) >> 8; got != w {
+			t.Fatalf("sample %d = %d, want %d", i, got, w)
+		}
+	}
+}
+
 func TestConverterWidensTo24And32Bits(t *testing.T) {
 	for _, bits := range []int{24, 32} {
-		c := newConverter(OutputConfig{Bits: bits, Rate: SourceRate, Dither: "auto"}, 1)
+		c := newConverter(Format{Rate: 44100, Bits: bits}, "auto", cd)
 		out := make([]byte, 2*bits/8)
-		c.fill(out, 1, 0.5, func(src []int16) { src[0], src[1] = 1, -32768 })
+		c.fill(out, 1, 0.5, func(src []int32) { src[0], src[1] = s16(1), s16(-32768) })
 		read := func(i int) int64 {
 			var v int64
 			b := bits / 8
@@ -39,58 +68,143 @@ func TestConverterWidensTo24And32Bits(t *testing.T) {
 }
 
 func TestDitherOnlyWhenRequantizing(t *testing.T) {
-	c := newConverter(OutputConfig{Bits: 16, Rate: SourceRate, Dither: "auto"}, 64)
-	out := make([]byte, 64*4)
-	c.fill(out, 64, 0.5, func(src []int16) {})
-	nonzero := 0
-	for i := 0; i < 128; i++ {
-		if binary.LittleEndian.Uint16(out[i*2:]) != 0 {
-			nonzero++
+	nonzero := func(out []byte) int {
+		n := 0
+		for i := 0; i+1 < len(out); i += 2 {
+			if binary.LittleEndian.Uint16(out[i:]) != 0 {
+				n++
+			}
 		}
+		return n
 	}
-	if nonzero == 0 {
+	out := make([]byte, 64*4)
+	c := newConverter(cd, "auto", cd)
+	c.fill(out, 64, 0.5, func(src []int32) {})
+	if nonzero(out) == 0 {
 		t.Fatal("expected dither noise on scaled 16-bit output")
 	}
-	c = newConverter(OutputConfig{Bits: 16, Rate: SourceRate, Dither: "off"}, 64)
-	c.fill(out, 64, 0.5, func(src []int16) {})
-	for i := 0; i < 128; i++ {
-		if binary.LittleEndian.Uint16(out[i*2:]) != 0 {
-			t.Fatal("dither=off produced noise from silence")
+	c = newConverter(cd, "off", cd)
+	c.fill(out, 64, 0.5, func(src []int32) {})
+	if nonzero(out) != 0 {
+		t.Fatal("dither=off produced noise from silence")
+	}
+	c = newConverter(cd, "auto", cd)
+	c.fill(out, 64, 1, func(src []int32) {})
+	if nonzero(out) != 0 {
+		t.Fatal("unmodified 16-bit audio was dithered")
+	}
+	// 24-bit audio written as 16 bits is requantized, so it is dithered.
+	c = newConverter(cd, "auto", Format{Rate: 44100, Bits: 24})
+	c.fill(out, 64, 1, func(src []int32) {})
+	if nonzero(out) == 0 {
+		t.Fatal("expected dither noise on 24-bit audio written as 16 bits")
+	}
+}
+
+// tone returns blocks of a 1 kHz stereo tone at rate.
+func tone(rate int, amplitude float64) func() []int32 {
+	n := 0
+	return func() []int32 {
+		block := make([]int32, 512*2)
+		for i := 0; i < 512; i++ {
+			v := int32(amplitude * FullScale * math.Sin(2*math.Pi*1000*float64(n)/float64(rate)))
+			block[2*i], block[2*i+1] = v, v
+			n++
 		}
+		return block
+	}
+}
+
+// checkTone checks that out (interleaved, at rate) is a clean 1 kHz tone.
+func checkTone(t *testing.T, out []float64, rate int, amplitude float64) {
+	t.Helper()
+	var sumSin, sumCos, energy float64
+	start, end := rate/10, len(out)/2 // skip the start-up transient
+	for i := start; i < end; i++ {
+		x := out[2*i]
+		sumSin += x * math.Sin(2*math.Pi*1000*float64(i)/float64(rate))
+		sumCos += x * math.Cos(2*math.Pi*1000*float64(i)/float64(rate))
+		energy += x * x
+	}
+	count := float64(end - start)
+	got := 2 * math.Hypot(sumSin, sumCos) / count
+	if math.Abs(got-amplitude) > 0.01 {
+		t.Fatalf("amplitude %.4f, want %.4f", got, amplitude)
+	}
+	// Nearly all energy is at 1 kHz.
+	if tone := got * got / 2 * count; tone/energy < 0.999 {
+		t.Fatalf("distortion too high: %.5f of energy in tone", tone/energy)
 	}
 }
 
 // A 1 kHz tone resampled to 48 kHz keeps its frequency and level.
 func TestResamplerPreservesTone(t *testing.T) {
 	r := newResampler(44100, 48000)
-	n := 0
-	more := func() []int16 {
-		block := make([]int16, 512*2)
-		for i := 0; i < 512; i++ {
-			v := int16(16000 * math.Sin(2*math.Pi*1000*float64(n)/44100))
-			block[2*i], block[2*i+1] = v, v
-			n++
-		}
-		return block
-	}
 	out := make([]float64, 48000*2)
-	r.read(out, more)
-	// Skip the start-up transient, then correlate against 1 kHz at 48 kHz.
-	var sumSin, sumCos, energy float64
-	for i := 4800; i < 48000; i++ {
-		x := out[2*i]
-		sumSin += x * math.Sin(2*math.Pi*1000*float64(i)/48000)
-		sumCos += x * math.Cos(2*math.Pi*1000*float64(i)/48000)
-		energy += x * x
+	r.read(out, tone(44100, 0.5))
+	checkTone(t, out, 48000, 0.5)
+}
+
+// Downsampling 48 kHz to 44.1 kHz (a fixed output rate) keeps the tone too.
+func TestResamplerDownsamplesTone(t *testing.T) {
+	r := newResampler(48000, 44100)
+	out := make([]float64, 44100*2)
+	r.read(out, tone(48000, 0.5))
+	checkTone(t, out, 44100, 0.5)
+}
+
+func TestResolveFollowsTheStream(t *testing.T) {
+	follow := OutputConfig{}
+	cases := []struct{ in, want Format }{
+		{Format{44100, 16}, Format{44100, 16}},
+		{Format{48000, 16}, Format{48000, 16}},
+		{Format{48000, 24}, Format{48000, 24}},
 	}
-	count := float64(48000 - 4800)
-	amplitude := 2 * math.Hypot(sumSin, sumCos) / count
-	if math.Abs(amplitude-16000.0/32768) > 0.01 {
-		t.Fatalf("amplitude %.4f, want %.4f", amplitude, 16000.0/32768)
+	for _, c := range cases {
+		if got := follow.Resolve(c.in); got != c.want {
+			t.Errorf("follow %v gave %v, want %v", c.in, got, c.want)
+		}
 	}
-	// Nearly all energy is at 1 kHz.
-	if tone := amplitude * amplitude / 2 * count; tone/energy < 0.999 {
-		t.Fatalf("distortion too high: %.5f of energy in tone", tone/energy)
+	fixed := OutputConfig{Rate: 96000, Bits: 32}
+	if got := fixed.Resolve(Format{48000, 24}); got != (Format{96000, 32}) {
+		t.Errorf("fixed format gave %v", got)
+	}
+	if got := (OutputConfig{Rate: 48000}).Resolve(Format{44100, 24}); got != (Format{48000, 24}) {
+		t.Errorf("fixed rate, following bits gave %v", got)
+	}
+}
+
+type formatSource struct {
+	format Format
+	fills  int
+}
+
+func (s *formatSource) Format() Format { return s.format }
+func (s *formatSource) Fill(out []int32, _, _ time.Duration) {
+	s.fills++
+	for i := range out {
+		out[i] = s16(1000)
+	}
+}
+
+// A fixed-format output converts a stream whose format changes.
+func TestFixedOutputFollowsSourceFormat(t *testing.T) {
+	src := &formatSource{format: cd}
+	f := newFixedOutput(src, cd)
+	out := make([]int16, 512*2)
+	f.read(out, 0, 0)
+	if out[0] != 1000 || out[len(out)-1] != 1000 {
+		t.Fatalf("44.1 kHz passthrough gave %d..%d", out[0], out[len(out)-1])
+	}
+	src.format = Format{Rate: 48000, Bits: 24}
+	for i := 0; i < 20; i++ {
+		f.read(out, 0, 0)
+	}
+	if f.conv.resampler == nil || f.in != src.format {
+		t.Fatal("converter did not follow the new format")
+	}
+	if v := out[len(out)-1]; v < 990 || v > 1010 {
+		t.Fatalf("resampled constant gave %d", v)
 	}
 }
 

@@ -145,7 +145,7 @@ func (p *Player) AddNetwork(received, missing, late, requested, recovered, full 
 	p.net.full.Add(full)
 }
 
-func ms(samples float64) string { return fmt.Sprintf("%+.2fms", samples*1000/float64(sampleRate)) }
+func ms(samples float64, rate int) string { return fmt.Sprintf("%+.2fms", samples*1000/float64(rate)) }
 
 // Statistics returns one line describing playback since the previous call,
 // or false when nothing was played. elapsed is the time since that call.
@@ -163,6 +163,7 @@ func (p *Player) Statistics(elapsed time.Duration) (string, bool) {
 	p.mu.Lock()
 	synchronized := p.synchronized
 	smoothed := p.syncError
+	rate := int(p.rate())
 	p.mu.Unlock()
 	if s.frames == 0 || s.silent == s.frames && n.received == 0 {
 		return "", false
@@ -172,7 +173,7 @@ func (p *Player) Statistics(elapsed time.Duration) (string, bool) {
 	if synchronized {
 		if s.errCount > 0 {
 			fmt.Fprintf(&b, " sync-error=%s smoothed=%s min=%s max=%s",
-				ms(float64(s.errSum)/float64(s.errCount)), ms(smoothed), ms(float64(s.errMin)), ms(float64(s.errMax)))
+				ms(float64(s.errSum)/float64(s.errCount), rate), ms(smoothed, rate), ms(float64(s.errMin), rate), ms(float64(s.errMax), rate))
 		}
 		// Net correction rate: what the drift correction did, which once
 		// settled is the drift between sender and sound card.

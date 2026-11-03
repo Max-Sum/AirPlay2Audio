@@ -78,8 +78,8 @@ These are the command-line options of `AirPlay2Engine.exe`. The window's advance
 | --- | --- | --- |
 | `-output-device` | empty | Output device, as an index or part of a name from `-list-devices`, case-insensitive. Empty uses the Windows default device |
 | `-list-devices` | | List output devices and exit |
-| `-output-bits` | `16` | Output sample size, 16, 24 or 32 |
-| `-output-rate` | `44100` | Output sample rate, 44100, 48000, 88200, 96000, 176400 or 192000 |
+| `-output-bits` | `0` | Output sample size, 16, 24 or 32; `0` follows the stream |
+| `-output-rate` | `0` | Output sample rate, 44100, 48000, 88200, 96000, 176400 or 192000; `0` follows the stream |
 | `-dither` | `auto` | Dither, `auto`, `on` or `off` |
 | `-volume-range` | `60` | Attenuation in dB at the sender's lowest volume step. Same as shairport-sync's `volume_range_db` |
 
@@ -151,9 +151,11 @@ In `low-latency` mode the line reports the samples removed to catch up instead.
 
 When `-output-device` is empty, the receiver releases the device after `-active-timeout` seconds of idle time and opens the current Windows default device on the next playback. The Windows waveOut API truncates device names to 31 characters.
 
-Senders always send 44.1 kHz 16-bit audio. A higher output format does not improve the source. It helps when a sound card only accepts certain formats, or to keep precision when lowering the volume. Volume is applied in floating point, so 24-bit and 32-bit output lose no precision. At rates other than 44.1 kHz, the receiver resamples with a windowed sinc filter.
+Senders choose the stream format: AirPlay 2 buffered streams arrive as AAC at 44.1 or 48 kHz, or lossless ALAC at 48 kHz 24-bit; realtime and AirPlay 1 streams are 44.1 kHz 16-bit. The receiver decodes and plays each stream at its own rate and sample size. By default (`-output-rate 0 -output-bits 0`) the output follows the stream: 16-bit audio is written as 16-bit and 24-bit audio as 24-bit, at the stream's rate, and the device is reopened when the sender changes format. Windows shared mode still converts to the device format set in Sound settings.
 
-`-dither auto` adds TPDF dither only for 16-bit output after a volume change or resampling.
+A fixed output format does not improve the source. It helps when a sound card only accepts certain formats, or to keep precision when lowering the volume. Volume is applied in floating point, so 24-bit and 32-bit output lose no precision. When the output rate differs from the stream's, the receiver resamples with a windowed sinc filter.
+
+`-dither auto` adds TPDF dither only to 16-bit output after a volume change or resampling, or of 24-bit audio.
 
 ### Multiple senders
 

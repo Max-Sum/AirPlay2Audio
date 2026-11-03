@@ -52,10 +52,10 @@ func TestClassicDecryptsAndDecodesALAC(t *testing.T) {
 	if err != nil {
 		t.Fatal(err)
 	}
-	if frame.Timestamp != 5000 || frame.SequenceNumber != 7 || len(frame.Data()) != 352*4 {
+	if frame.Timestamp != 5000 || frame.SequenceNumber != 7 || len(frame.Data()) != 352*2 {
 		t.Fatalf("frame ts=%d seq=%d len=%d", frame.Timestamp, frame.SequenceNumber, len(frame.Data()))
 	}
-	if binary.LittleEndian.Uint16(frame.Data()[4:6]) != 1 || binary.LittleEndian.Uint16(frame.Data()[6:8]) != 1001 {
+	if frame.Data()[2] != 1<<16 || frame.Data()[3] != 1001<<16 || frame.Format() != cdFormat {
 		t.Fatal("decoded samples differ")
 	}
 }
@@ -71,7 +71,7 @@ func TestClassicL16IsByteSwapped(t *testing.T) {
 	if err != nil {
 		t.Fatal(err)
 	}
-	if got := frame.Data(); got[0] != 0x34 || got[1] != 0x12 || got[2] != 0xfe || got[3] != 0xff {
+	if got := frame.Data(); got[0] != 0x1234<<16 || got[1] != -2<<16 {
 		t.Fatalf("got %x", got)
 	}
 }

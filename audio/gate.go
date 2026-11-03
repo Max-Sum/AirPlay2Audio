@@ -53,11 +53,12 @@ type standbyWatch struct {
 func (w *standbyWatch) reset() { *w = standbyWatch{} }
 
 func (w *standbyWatch) observe(s *Server, frame *PCMFrame) {
-	n := int64(len(frame.pcmData) / 4)
+	n := int64(frame.frames())
+	rate := int64(frame.format.Rate)
 	if frame.silent() {
 		w.silent += n
 		w.sound = 0
-		if !w.paused && w.silent >= int64(standbyPausedAfter)*sampleRate/int64(time.Second) {
+		if !w.paused && w.silent >= int64(standbyPausedAfter)*rate/int64(time.Second) {
 			w.paused = true
 			log.Print("AUDIO realtime waiting sender is silent (paused)")
 		}
@@ -65,7 +66,7 @@ func (w *standbyWatch) observe(s *Server, frame *PCMFrame) {
 	}
 	w.sound += n
 	w.silent = 0
-	if w.paused && w.sound >= int64(standbyResumedAfter)*sampleRate/int64(time.Second) {
+	if w.paused && w.sound >= int64(standbyResumedAfter)*rate/int64(time.Second) {
 		w.reset()
 		log.Print("AUDIO realtime waiting sender is sending audio again")
 		if resume := s.OnResume; resume != nil {
@@ -74,11 +75,11 @@ func (w *standbyWatch) observe(s *Server, frame *PCMFrame) {
 	}
 }
 
-// silent reports digital silence (allowing for dither).
+// silent reports digital silence (allowing for 16-bit dither).
 func (f *PCMFrame) silent() bool {
-	for i := 0; i+1 < len(f.pcmData); i += 2 {
-		v := int16(uint16(f.pcmData[i]) | uint16(f.pcmData[i+1])<<8)
-		if v > 4 || v < -4 {
+	const limit = 4 << 16
+	for _, v := range f.samples {
+		if v > limit || v < -limit {
 			return false
 		}
 	}

@@ -325,8 +325,12 @@ internal sealed class Settings
     public bool TrayTipShown = false;
     public string Password = ""; // empty: anyone on the network may play
     public string OutputDevice = ""; // empty: Windows default device
-    public int OutputRate = 44100;
-    public int OutputBits = 16;
+    public int OutputRate = 0; // 0: follow the stream
+    public int OutputBits = 0; // 0: follow the stream
+    // Settings saved before version 2 had no "follow the stream" format;
+    // their default, 44.1 kHz / 16-bit "no conversion", becomes it.
+    private const int CurrentOutputFormatVersion = 2;
+    private int outputFormatVersion = 1;
     public bool Statistics = false;
     public string Language = L.Auto;
     public string Dither = "auto"; // auto, on or off
@@ -365,6 +369,10 @@ internal sealed class Settings
                     if (eq <= 0) continue;
                     s.Set(line.Substring(0, eq).Trim(), line.Substring(eq + 1).Trim());
                 }
+                if (s.outputFormatVersion < CurrentOutputFormatVersion && s.OutputRate == 44100 && s.OutputBits == 16) {
+                    s.OutputRate = 0;
+                    s.OutputBits = 0;
+                }
             } else {
                 s.MigrateOld();
             }
@@ -401,8 +409,9 @@ internal sealed class Settings
             case "TrayTipShown": if (Boolean.TryParse(value, out b)) TrayTipShown = b; break;
             case "Password": Password = Unprotect(value); break;
             case "OutputDevice": OutputDevice = value; break;
-            case "OutputRate": if (Int32.TryParse(value, out n) && OutputFormat.ValidRate(n)) OutputRate = n; break;
-            case "OutputBits": if (Int32.TryParse(value, out n) && (n == 16 || n == 24 || n == 32)) OutputBits = n; break;
+            case "OutputRate": if (Int32.TryParse(value, out n) && (n == 0 || OutputFormat.ValidRate(n))) OutputRate = n; break;
+            case "OutputBits": if (Int32.TryParse(value, out n) && (n == 0 || n == 16 || n == 24 || n == 32)) OutputBits = n; break;
+            case "OutputFormatVersion": if (Int32.TryParse(value, out n)) outputFormatVersion = n; break;
             case "Statistics": if (Boolean.TryParse(value, out b)) Statistics = b; break;
             case "Language": if (value == L.Chinese || value == L.English) Language = value; break;
             case "Dither": if (value == "auto" || value == "on" || value == "off") Dither = value; break;
@@ -464,6 +473,7 @@ internal sealed class Settings
                 "OutputDevice=" + OutputDevice.Replace("\r", "").Replace("\n", ""),
                 "OutputRate=" + OutputRate.ToString(CultureInfo.InvariantCulture),
                 "OutputBits=" + OutputBits.ToString(CultureInfo.InvariantCulture),
+                "OutputFormatVersion=" + CurrentOutputFormatVersion.ToString(CultureInfo.InvariantCulture),
                 "Statistics=" + Statistics,
                 "Language=" + Language,
                 "Dither=" + Dither,
@@ -598,8 +608,8 @@ internal sealed class Engine
         if (s.NetworkInterface.Length > 0) args.Append(" -i ").Append(Quote(s.NetworkInterface));
         if (s.TraceLog) args.Append(" -trace");
         if (s.OutputDevice.Length > 0) args.Append(" -output-device ").Append(Quote(s.OutputDevice));
-        if (s.OutputRate != 44100) args.Append(" -output-rate ").Append(s.OutputRate.ToString(CultureInfo.InvariantCulture));
-        if (s.OutputBits != 16) args.Append(" -output-bits ").Append(s.OutputBits.ToString(CultureInfo.InvariantCulture));
+        if (s.OutputRate != 0) args.Append(" -output-rate ").Append(s.OutputRate.ToString(CultureInfo.InvariantCulture));
+        if (s.OutputBits != 0) args.Append(" -output-bits ").Append(s.OutputBits.ToString(CultureInfo.InvariantCulture));
         if (s.Statistics) args.Append(" -statistics");
         if (s.Dither != "auto") args.Append(" -dither ").Append(s.Dither);
         if (s.RealtimeAnchor != "shairport") args.Append(" -realtime-anchor ").Append(s.RealtimeAnchor);
@@ -1520,15 +1530,16 @@ internal sealed class OutputFormat
     public int Bits;
     public override string ToString()
     {
+        if (Rate == 0) return L.T("跟随音源（默认，不转换）", "Follow the source (default, no conversion)");
         string rate = (Rate % 1000 == 0 ? (Rate / 1000).ToString(CultureInfo.InvariantCulture) : (Rate / 1000.0).ToString("0.0", CultureInfo.InvariantCulture)) + " kHz";
-        string text = rate + " / " + Bits + L.T(" 位", "-bit");
-        return Rate == 44100 && Bits == 16 ? text + L.T("（默认，不转换）", " (default, no conversion)") : text;
+        return rate + " / " + Bits + L.T(" 位", "-bit");
     }
     public static bool ValidRate(int rate)
     {
         return rate == 44100 || rate == 48000 || rate == 88200 || rate == 96000 || rate == 176400 || rate == 192000;
     }
     public static readonly OutputFormat[] All = {
+        new OutputFormat { Rate = 0, Bits = 0 },
         new OutputFormat { Rate = 44100, Bits = 16 }, new OutputFormat { Rate = 44100, Bits = 24 },
         new OutputFormat { Rate = 48000, Bits = 16 }, new OutputFormat { Rate = 48000, Bits = 24 },
         new OutputFormat { Rate = 88200, Bits = 24 }, new OutputFormat { Rate = 96000, Bits = 24 },
@@ -1692,7 +1703,7 @@ internal sealed class AdvancedForm : Form
         }
         if (format.SelectedIndex < 0) format.SelectedIndex = 0;
         dither.DropDownStyle = ComboBoxStyle.DropDownList; dither.Dock = DockStyle.Fill;
-        Choose(dither, s.Dither, new NetworkChoice { Name = "auto", Label = L.T("自动（16 位且调过音量或重采样时）", "Auto (16-bit with volume change or resampling)") },
+        Choose(dither, s.Dither, new NetworkChoice { Name = "auto", Label = L.T("自动（16 位且调过音量、重采样或音源为 24 位时）", "Auto (16-bit with volume change, resampling or 24-bit audio)") },
             new NetworkChoice { Name = "on", Label = L.T("始终加入", "Always") }, new NetworkChoice { Name = "off", Label = L.T("关闭", "Off") });
         Row(g, L.T("抖动", "Dither"), dither, null);
 

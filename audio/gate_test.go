@@ -79,14 +79,14 @@ func TestLeftoverControlPacket(t *testing.T) {
 }
 
 func TestStandbyWatchNeedsPauseThenSound(t *testing.T) {
-	silence := testPCM(0, 0, make([]int16, 352*2)...)
-	loud := make([]int16, 352*2)
+	silence := formatPCM(cdFormat, 0, 0, make([]int32, 352*2)...)
+	loud := make([]int32, 352*2)
 	for i := range loud {
-		loud[i] = 3000
+		loud[i] = 3000 << 16
 	}
-	sound := testPCM(0, 0, loud...)
+	sound := formatPCM(cdFormat, 0, 0, loud...)
 	feed := func(w *standbyWatch, s *Server, frame *PCMFrame, d time.Duration) {
-		for i := int64(0); i < int64(d)*sampleRate/int64(time.Second)/352+1; i++ {
+		for i := int64(0); i < int64(d)*cdRate/int64(time.Second)/352+1; i++ {
 			w.observe(s, frame)
 		}
 	}

@@ -5,19 +5,17 @@ import (
 	"strings"
 )
 
-// SourceRate is the rate of the PCM the player hands to the output stream.
-const SourceRate = 44100
-
 // OutputConfig selects the output device and the format written to it. The
-// player always produces 44.1 kHz 16-bit stereo; the stream converts it.
+// player produces stereo at the rate and sample size of the stream being
+// played; the output follows it, or converts it to a fixed format.
 type OutputConfig struct {
 	// Device is empty for the system default device, a number for a device
 	// index from Devices, or otherwise a case-insensitive part of its name.
 	Device string
-	Bits   int // 16, 24 or 32
-	Rate   int // 44100, 48000, 88200, 96000, 176400 or 192000
-	// Dither is "auto" (only for 16-bit output whose samples were scaled or
-	// resampled), "on" or "off".
+	Bits   int // 16, 24 or 32; 0 follows the stream
+	Rate   int // 44100, 48000, 88200, 96000, 176400 or 192000; 0 follows the stream
+	// Dither is "auto" (only for 16-bit output whose samples were scaled,
+	// resampled or had more than 16 bits), "on" or "off".
 	Dither string
 	// API is the Windows output API: "wasapi" (default; falls back to
 	// waveOut when it cannot be opened) or "waveout".
@@ -33,18 +31,34 @@ type OutputConfig struct {
 const DefaultBufferMs = 20
 
 // Output is read when a stream opens its device.
-var Output = OutputConfig{Bits: 16, Rate: SourceRate, Dither: "auto", API: "wasapi", BufferMs: DefaultBufferMs}
+var Output = OutputConfig{Dither: "auto", API: "wasapi", BufferMs: DefaultBufferMs}
+
+// Resolve returns the format written to the device while the player
+// produces audio in format in.
+func (c OutputConfig) Resolve(in Format) Format {
+	out := Format{Rate: c.Rate, Bits: c.Bits}
+	if out.Rate == 0 {
+		out.Rate = in.Rate
+	}
+	if out.Bits == 0 {
+		out.Bits = 16
+		if in.Bits > 16 {
+			out.Bits = 24
+		}
+	}
+	return out
+}
 
 func (c OutputConfig) Validate() error {
 	switch c.Bits {
-	case 16, 24, 32:
+	case 0, 16, 24, 32:
 	default:
-		return fmt.Errorf("output bits must be 16, 24 or 32")
+		return fmt.Errorf("output bits must be 0 (follow the stream), 16, 24 or 32")
 	}
 	switch c.Rate {
-	case 44100, 48000, 88200, 96000, 176400, 192000:
+	case 0, 44100, 48000, 88200, 96000, 176400, 192000:
 	default:
-		return fmt.Errorf("output rate must be 44100, 48000, 88200, 96000, 176400 or 192000")
+		return fmt.Errorf("output rate must be 0 (follow the stream), 44100, 48000, 88200, 96000, 176400 or 192000")
 	}
 	switch strings.ToLower(c.Dither) {
 	case "auto", "on", "off":

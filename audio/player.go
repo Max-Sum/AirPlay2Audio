@@ -1,7 +1,6 @@
 package audio
 
 import (
-	"encoding/binary"
 	"github.com/Max-Sum/AirPlay2Audio/codec"
 	"github.com/Max-Sum/AirPlay2Audio/globals"
 	"github.com/Max-Sum/AirPlay2Audio/ptp"
@@ -28,7 +27,10 @@ type Player struct {
 	baseCapacity   int
 	mu             sync.Mutex
 	frame          *PCMFrame
-	frameOffset    int // stereo samples, not bytes
+	frameOffset    int // stereo frames
+	// format is that of the audio being played. A frame in another format
+	// waits until the output asks for the format again (see Format).
+	format         codec.Format
 	reportedOutput bool
 	playoutRTP     uint32
 	havePlayout    bool
@@ -49,7 +51,7 @@ type Player struct {
 	sync      SyncOptions
 	syncError float64 // smoothed sender-minus-playout error, in samples
 	stuffing  int     // current correction: +1 consume extra, -1 consume fewer
-	scratch   []int16
+	scratch   []int32
 
 	stats statistics
 	net   netCounters
@@ -107,25 +109,61 @@ func (p *Player) SetSyncOptions(o SyncOptions) {
 // playback stops. Zero keeps it open. Call before Run.
 func (p *Player) SetActiveTimeout(d time.Duration) { p.activeTimeout = d }
 
+// rate is the rate of the audio being played; a player built without
+// NewPlayer (in tests) plays at 44.1 kHz.
+func (p *Player) rate() int64 {
+	if p.format.Rate == 0 {
+		return cdRate
+	}
+	return int64(p.format.Rate)
+}
+
 func (p *Player) resyncLimit() int64 {
 	if p.sync.Resync <= 0 {
-		return sampleRate / 20
+		return p.rate() / 20
 	}
-	return int64(p.sync.Resync) * sampleRate / int64(time.Second)
+	return int64(p.sync.Resync) * p.rate() / int64(time.Second)
 }
 
 const (
 	// Backlog kept as jitter margin; anything persistently above it is delay.
-	catchUpTarget = int(sampleRate) * 30 / 1000
-	// The backlog minimum is taken over this many output samples.
-	catchUpWindow = int(sampleRate) * 2
+	catchUpTarget = 30 * time.Millisecond
+	// The backlog minimum is taken over this long.
+	catchUpWindow = 2 * time.Second
 	// Remove at most one sample in this many (about 2% faster playback).
 	catchUpRatio = 50
 )
 
+// frames converts a duration to frames at the playing rate.
+func (p *Player) frames(d time.Duration) int { return int(int64(d) * p.rate() / int64(time.Second)) }
+
 func NewPlayer(clock *ptp.VirtualClock, ring *Ring) *Player {
-	return &Player{clock: &Clock{virtualClock: clock}, ControlChannel: make(chan globals.ControlMessage, 100), stream: codec.NewStream(), ringBuffer: ring, baseCapacity: ring.Capacity(), synchronized: true, sync: DefaultSyncOptions, volumeRange: DefaultVolumeRange}
+	return &Player{clock: &Clock{virtualClock: clock, rate: int64(codec.DefaultFormat.Rate)}, format: codec.DefaultFormat,
+		ControlChannel: make(chan globals.ControlMessage, 100), stream: codec.NewStream(), ringBuffer: ring, baseCapacity: ring.Capacity(),
+		synchronized: true, sync: DefaultSyncOptions, volumeRange: DefaultVolumeRange}
 }
+
+// Format reports the format of the audio the next Fill produces. When the
+// next frame to play is in another format, the player switches to it now:
+// the output calls this before every Fill and reconfigures itself to match.
+func (p *Player) Format() codec.Format {
+	p.mu.Lock()
+	defer p.mu.Unlock()
+	if p.frame != nil && p.frame.format != p.format {
+		f := p.frame.format
+		log.Printf("AUDIO player format %d Hz %d-bit (was %d Hz %d-bit)", f.Rate, f.Bits, p.format.Rate, p.format.Bits)
+		p.format = f
+		p.clock.rate = int64(f.Rate)
+		// Timestamps now count at the new rate: start the timeline again.
+		p.havePlayout, p.clockOutliers = false, 0
+		p.syncError, p.stuffing = 0, 0
+		p.resetCatchUp()
+	}
+	return p.format
+}
+
+// held reports whether the current frame must wait for a format switch.
+func (p *Player) held() bool { return p.frame != nil && p.frame.format != p.format }
 
 // SetSynchronized selects timestamp-based playout. Configure it before Init.
 // When false, audio is played as it arrives without PTP scheduling, as in
@@ -133,9 +171,9 @@ func NewPlayer(clock *ptp.VirtualClock, ring *Ring) *Player {
 // by the sender or guarantee synchronization with video or other receivers.
 func (p *Player) SetSynchronized(enabled bool) { p.synchronized = enabled }
 
-// callBack fills a block according to the PTP/RTP anchor, including silence
+// Fill fills a block according to the PTP/RTP anchor, including silence
 // before an early packet and dropping samples whose playback time has passed.
-func (p *Player) callBack(out []int16, currentTime, outputBufferDacTime time.Duration) {
+func (p *Player) Fill(out []int32, currentTime, outputBufferDacTime time.Duration) {
 	clear(out)
 	p.mu.Lock()
 	defer p.mu.Unlock()
@@ -167,17 +205,22 @@ func (p *Player) callBack(out []int16, currentTime, outputBufferDacTime time.Dur
 	}
 }
 
+// interpolate returns the sample a fraction frac of the way from a to b.
+func interpolate(a, b int32, frac float64) int32 {
+	return int32(math.Round(float64(a) + (float64(b)-float64(a))*frac))
+}
+
 // renderStretched plays consume source samples (one more or one fewer than
 // the block) into out by linear interpolation, keeping the first and last
 // samples so successive blocks join without a step. This is how drift is
 // corrected without audible clicks.
-func (p *Player) renderStretched(out []int16, start uint32, consume int) int {
+func (p *Player) renderStretched(out []int32, start uint32, consume int) int {
 	frames := len(out) / 2
 	if consume == frames || frames < 2 || consume < 2 {
 		return p.renderAt(out, start)
 	}
 	if cap(p.scratch) < consume*2 {
-		p.scratch = make([]int16, consume*2)
+		p.scratch = make([]int32, consume*2)
 	}
 	src := p.scratch[:consume*2]
 	clear(src)
@@ -191,8 +234,7 @@ func (p *Player) renderStretched(out []int16, start uint32, consume int) int {
 		}
 		frac := pos - float64(j)
 		for c := 0; c < 2; c++ {
-			a, b := float64(src[2*j+c]), float64(src[2*(j+1)+c])
-			out[2*i+c] = int16(math.Round(a + (b-a)*frac))
+			out[2*i+c] = interpolate(src[2*j+c], src[2*(j+1)+c], frac)
 		}
 	}
 	if written > frames {
@@ -201,27 +243,38 @@ func (p *Player) renderStretched(out []int16, start uint32, consume int) int {
 	return written
 }
 
+// next makes the next queued frame current, if there is none. It reports
+// false when nothing can be played now: the queue is empty, or the frame
+// waits for the output to switch to its format.
+func (p *Player) next() bool {
+	if p.frame == nil {
+		item, err := p.ringBuffer.TryPop()
+		if err != nil {
+			return false
+		}
+		p.frame, p.frameOffset = item.(*PCMFrame), 0
+		if n := p.frame.frames(); n > 0 {
+			p.frameSamples = n // for backlog
+		}
+	}
+	return !p.held()
+}
+
 // renderFIFO preserves the order and all samples of frames received so far,
 // while deliberately ignoring their future PTP presentation timestamps.
 // The audio device still determines playback speed; it cannot play faster
 // than real time or make the sender transmit a packet earlier.
-func (p *Player) renderFIFO(out []int16) int {
+func (p *Player) renderFIFO(out []int32) int {
 	written := 0
 	for cursor := 0; cursor+1 < len(out); {
-		if p.frame == nil {
-			item, err := p.ringBuffer.TryPop()
-			if err != nil {
-				break
-			}
-			p.frame, p.frameOffset = item.(*PCMFrame), 0
-			if n := len(p.frame.pcmData) / 4; n > 0 {
-				p.frameSamples = n
-			}
-			if p.catchUp && p.dropBudget > 0 {
-				p.frame = p.compress(p.frame)
-			}
+		fresh := p.frame == nil
+		if !p.next() {
+			break
 		}
-		available := len(p.frame.pcmData)/4 - p.frameOffset
+		if fresh && p.catchUp && p.dropBudget > 0 {
+			p.frame = p.compress(p.frame)
+		}
+		available := p.frame.frames() - p.frameOffset
 		if available <= 0 {
 			p.frame = nil
 			continue
@@ -230,9 +283,7 @@ func (p *Player) renderFIFO(out []int16) int {
 		if count > (len(out)-cursor)/2 {
 			count = (len(out) - cursor) / 2
 		}
-		for i := 0; i < count*2; i++ {
-			out[cursor+i] = int16(binary.LittleEndian.Uint16(p.frame.pcmData[p.frameOffset*4+i*2:]))
-		}
+		copy(out[cursor:cursor+count*2], p.frame.samples[p.frameOffset*2:])
 		cursor += count * 2
 		written += count
 		p.frameOffset += count
@@ -263,7 +314,7 @@ func (p *Player) resetCatchUp() {
 func (p *Player) backlog() int {
 	n := p.ringBuffer.Length() * p.frameSamples
 	if p.frame != nil {
-		n += len(p.frame.pcmData)/4 - p.frameOffset
+		n += p.frame.frames() - p.frameOffset
 	}
 	return n
 }
@@ -276,16 +327,16 @@ func (p *Player) trackBacklog(frames int) {
 		p.backlogMin = b
 	}
 	p.windowFrames += frames
-	if p.windowFrames < catchUpWindow {
+	if p.windowFrames < p.frames(catchUpWindow) {
 		return
 	}
-	excess := p.backlogMin - catchUpTarget
+	excess := p.backlogMin - p.frames(catchUpTarget)
 	if excess < 0 {
 		excess = 0
 	}
 	p.dropBudget = excess
 	if excess > 0 && !p.catchingUp {
-		log.Printf("AUDIO low-latency catch-up: removing %d ms of queued delay", int64(excess)*1000/sampleRate)
+		log.Printf("AUDIO low-latency catch-up: removing %d ms of queued delay", int64(excess)*1000/p.rate())
 	}
 	p.catchingUp = excess > 0
 	p.backlogMin, p.windowFrames = -1, 0
@@ -295,7 +346,7 @@ func (p *Player) trackBacklog(frames int) {
 // linear interpolation. The first and last samples are kept, so adjacent
 // frames still join smoothly.
 func (p *Player) compress(f *PCMFrame) *PCMFrame {
-	n := len(f.pcmData) / 4
+	n := f.frames()
 	d := n / catchUpRatio
 	if d > p.dropBudget {
 		d = p.dropBudget
@@ -304,10 +355,7 @@ func (p *Player) compress(f *PCMFrame) *PCMFrame {
 	if d <= 0 || m < 2 {
 		return f
 	}
-	sample := func(index, channel int) float64 {
-		return float64(int16(binary.LittleEndian.Uint16(f.pcmData[(index*2+channel)*2:])))
-	}
-	out := make([]byte, m*4)
+	out := make([]int32, m*2)
 	scale := float64(n-1) / float64(m-1)
 	for i := 0; i < m; i++ {
 		pos := float64(i) * scale
@@ -317,13 +365,12 @@ func (p *Player) compress(f *PCMFrame) *PCMFrame {
 		}
 		frac := pos - float64(j)
 		for c := 0; c < 2; c++ {
-			a, b := sample(j, c), sample(j+1, c)
-			binary.LittleEndian.PutUint16(out[(i*2+c)*2:], uint16(int16(math.Round(a+(b-a)*frac))))
+			out[i*2+c] = interpolate(f.samples[j*2+c], f.samples[(j+1)*2+c], frac)
 		}
 	}
 	p.dropBudget -= d
 	p.stats.compressed += uint64(d)
-	return &PCMFrame{TcpPacket: f.TcpPacket, pcmData: out}
+	return &PCMFrame{TcpPacket: f.TcpPacket, samples: out, format: f.format}
 }
 
 func (p *Player) nextPlayout(target uint32, frames int) uint32 {
@@ -353,7 +400,7 @@ func (p *Player) planPlayout(target uint32, frames int) (uint32, int) {
 	if limit := p.resyncLimit(); difference > limit || difference < -limit {
 		p.clockOutliers++
 		if p.clockOutliers >= 12 {
-			log.Printf("AUDIO clock re-aligned by %d ms", difference*1000/sampleRate)
+			log.Printf("AUDIO clock re-aligned by %d ms", difference*1000/p.rate())
 			p.playoutRTP = target
 			p.clockOutliers = 0
 			p.syncError, p.stuffing = 0, 0
@@ -366,7 +413,7 @@ func (p *Player) planPlayout(target uint32, frames int) (uint32, int) {
 	}
 	consume := frames
 	if p.sync.DriftCorrection {
-		tolerance := float64(int64(p.sync.Tolerance) * sampleRate / int64(time.Second))
+		tolerance := float64(int64(p.sync.Tolerance) * p.rate() / int64(time.Second))
 		switch {
 		case p.syncError > tolerance:
 			p.stuffing = 1
@@ -394,20 +441,13 @@ func (p *Player) planPlayout(target uint32, frames int) (uint32, int) {
 // renderAt is called with the player lock held, after the output block has
 // been cleared. Keeping the sample alignment independent of wall time also
 // lets the timing and RTP wraparound behavior be tested deterministically.
-func (p *Player) renderAt(out []int16, target uint32) int {
+func (p *Player) renderAt(out []int32, target uint32) int {
 	written := 0
 	for cursor := 0; cursor+1 < len(out); {
-		if p.frame == nil {
-			item, err := p.ringBuffer.TryPop()
-			if err != nil {
-				return written
-			}
-			p.frame, p.frameOffset = item.(*PCMFrame), 0
-			if n := len(p.frame.pcmData) / 4; n > 0 {
-				p.frameSamples = n // for backlog
-			}
+		if !p.next() {
+			return written
 		}
-		available := len(p.frame.pcmData)/4 - p.frameOffset
+		available := p.frame.frames() - p.frameOffset
 		if available <= 0 {
 			p.frame = nil
 			continue
@@ -439,10 +479,7 @@ func (p *Player) renderAt(out []int16, target uint32) int {
 		if count > (len(out)-cursor)/2 {
 			count = (len(out) - cursor) / 2
 		}
-		for i := 0; i < count*2; i++ {
-			start := p.frameOffset*4 + i*2
-			out[cursor+i] = int16(binary.LittleEndian.Uint16(p.frame.pcmData[start:]))
-		}
+		copy(out[cursor:cursor+count*2], p.frame.samples[p.frameOffset*2:])
 		cursor += count * 2
 		written += count
 		p.frameOffset += count
@@ -466,12 +503,12 @@ func (p *Player) ArrivalLead(timestamp uint32) (time.Duration, bool) {
 	if !ok {
 		return 0, false
 	}
-	lead := time.Duration(int64(int32(timestamp-target))) * time.Second / time.Duration(sampleRate)
+	lead := time.Duration(int64(int32(timestamp-target))) * time.Second / time.Duration(p.rate())
 	p.stats.observeLead(lead)
 	return lead, true
 }
 
-func (p *Player) Init() error { return p.stream.Init(p.callBack) }
+func (p *Player) Init() error { return p.stream.Init(p) }
 
 func (p *Player) emit(event string) {
 	log.Printf("PLAYER %s", event)

@@ -1,11 +1,15 @@
 package audio
 
 import (
+	"github.com/Max-Sum/AirPlay2Audio/codec"
 	"github.com/Max-Sum/AirPlay2Audio/ptp"
 	"time"
 )
 
-const sampleRate int64 = 44100
+// AirPlay 2 realtime and AirPlay 1 streams are always 44.1 kHz 16-bit.
+const cdRate = 44100
+
+var cdFormat = codec.Format{Rate: cdRate, Bits: 16}
 
 // Clock maps the sender's anchor pair to RTP sample timestamps.
 type Clock struct {
@@ -13,6 +17,9 @@ type Clock struct {
 	anchorNetwork int64
 	anchorRTP     uint32
 	anchored      bool
+	// rate is the rate RTP timestamps count at: that of the audio being
+	// played. 0 means 44.1 kHz.
+	rate int64
 
 	// Used only by statistics.
 	lastOffset     time.Duration
@@ -61,6 +68,10 @@ func (c *Clock) TargetRTP(outputAhead time.Duration) (uint32, bool) {
 	if delta > int64(24*time.Hour) || delta < -int64(24*time.Hour) {
 		return 0, false
 	}
-	samples := (delta/int64(time.Second))*sampleRate + (delta%int64(time.Second))*sampleRate/int64(time.Second)
+	rate := c.rate
+	if rate == 0 {
+		rate = cdRate
+	}
+	samples := (delta/int64(time.Second))*rate + (delta%int64(time.Second))*rate/int64(time.Second)
 	return c.anchorRTP + uint32(samples), true
 }

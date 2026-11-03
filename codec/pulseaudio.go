@@ -49,12 +49,14 @@ func NewStream() Stream {
 	}
 }
 
-func (s *PaStream) Init(callBack StreamCallback) error {
+func (s *PaStream) Init(source Source) error {
 	var err error
+	// The device stays at 44.1 kHz 16-bit; other formats are converted.
+	fixed := newFixedOutput(source, Format{Rate: 44100, Bits: 16})
 	streamCallback := func(out []int16) (int, error) {
 		var copied = 0
 		if s.index+rtpPacketSize < audioBufferSize {
-			callBack(s.buffer[s.index:s.index+rtpPacketSize], 0*time.Second, 0*time.Second)
+			fixed.read(s.buffer[s.index:s.index+rtpPacketSize], 0*time.Second, 0*time.Second)
 			copied = copy(out, s.buffer[:s.index+rtpPacketSize])
 			s.index += rtpPacketSize - copied
 		} else {

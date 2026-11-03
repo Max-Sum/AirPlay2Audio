@@ -43,7 +43,7 @@ func realtimeAnchorStamp(frame1, frame2 uint32, mode RealtimeAnchor) uint32 {
 	reference := frame1
 	if mode == AnchorLowLatency {
 		// Ignore an implausible latency rather than jump by it.
-		if latency := int32(frame2 - frame1); latency > 0 && latency < int32(sampleRate)*4 {
+		if latency := int32(frame2 - frame1); latency > 0 && latency < cdRate*4 {
 			reference = frame2
 		}
 	}

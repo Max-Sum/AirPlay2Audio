@@ -1,7 +1,7 @@
 package audio
 
 import (
-	"math"
+	"reflect"
 	"sync/atomic"
 	"testing"
 
@@ -25,61 +25,69 @@ func TestRealtimeAnchorModes(t *testing.T) {
 	}
 }
 
-func TestRTPMapperIdentityAt44100(t *testing.T) {
-	m := newRTPMapper(44100)
-	for _, ts := range []uint32{0, 12345, math.MaxUint32} {
-		if got := m.Map(ts); got != ts {
-			t.Fatalf("Map(%d) = %d", ts, got)
-		}
-	}
-}
-
-// At 48 kHz the mapping scales by 44100/48000 and stays continuous across
-// the 32-bit wrap of the source timestamps.
-func TestRTPMapperScalesAcrossWrap(t *testing.T) {
-	m := newRTPMapper(48000)
-	start := uint32(math.MaxUint32 - 48000/2) // wraps after half a second
-	first := m.Map(start)
-	previous := first
-	for i := 1; i <= 40; i++ {
-		got := m.Map(start + uint32(i)*1024)
-		step := int32(got - previous)
-		if step < 940 || step > 941 {
-			t.Fatalf("block %d advanced %d samples, want 940 or 941", i, step)
-		}
-		previous = got
-	}
-	if total := int32(previous - first); total != 40*1024*44100/48000 {
-		t.Fatalf("40 blocks advanced %d samples", total)
-	}
-	// An anchor before the packets maps on the same timeline.
-	if got := int32(m.Map(start) - first); got != 0 {
-		t.Fatalf("anchor mapped %d samples away", got)
-	}
-}
-
-func TestStreamResamplerKeepsRatio(t *testing.T) {
-	r := codec.NewStreamResampler(48000, 44100)
-	in := make([]int16, 1024*2)
-	total := 0
-	for i := 0; i < 100; i++ {
-		total += len(r.Process(in)) / 2
-	}
-	want := 100 * 1024 * 44100 / 48000
-	if total < want-32 || total > want+1 {
-		t.Fatalf("produced %d frames, want about %d", total, want)
-	}
-}
-
-func TestToStereo16Rounds24Bit(t *testing.T) {
+// 24-bit lossless audio keeps all of its bits.
+func TestPCM24KeepsEveryBit(t *testing.T) {
 	put := func(v int32) []byte { return []byte{byte(v), byte(v >> 8), byte(v >> 16)} }
-	pcm := append(append(append(put(0x7fffff), put(-0x800000)...), put(0x000180)...), put(-0x000100)...)
-	got := toStereo16(pcm, formatALAC48000S24)
-	want := []int16{32767, -32768, 2, -1}
+	want := []int32{0x7fffff, -0x800000, 0x000180, -1}
+	var pcm []byte
+	for _, v := range want {
+		pcm = append(pcm, put(v)...)
+	}
+	got := pcm24(pcm)
 	for i := range want {
-		if got[i] != want[i] {
-			t.Fatalf("sample %d = %d, want %d", i, got[i], want[i])
+		if got[i]>>8 != want[i] || got[i]&0xff != 0 {
+			t.Fatalf("sample %d = %#x, want %#x", i, got[i], want[i]<<8)
 		}
+	}
+	if got := pcm16([]byte{0x01, 0x80, 0xff, 0x7f}); got[0] != -32767<<16 || got[1] != 32767<<16 {
+		t.Fatalf("16-bit samples %v", got)
+	}
+}
+
+// Decoded audio keeps the stream's own rate and sample size.
+func TestBufferedFramesKeepTheStreamFormat(t *testing.T) {
+	cases := []struct {
+		format bufferedFormat
+		want   codec.Format
+	}{
+		{formatAAC44100, codec.Format{Rate: 44100, Bits: 16}},
+		{formatAAC48000, codec.Format{Rate: 48000, Bits: 16}},
+		{formatALAC48000S24, codec.Format{Rate: 48000, Bits: 24}},
+		{formatAAC48000x51, codec.Format{Rate: 48000, Bits: 16}},
+	}
+	for _, c := range cases {
+		if got := c.format.pcmFormat(); got != c.want {
+			t.Errorf("%s decodes to %v, want %v", c.format.name, got, c.want)
+		}
+	}
+}
+
+// A frame in a new format waits until the output asks for the format; the
+// player then plays it, reading the anchor at the new rate.
+func TestPlayerSwitchesFormatAtFrameBoundary(t *testing.T) {
+	cd := codec.Format{Rate: 44100, Bits: 16}
+	hi := codec.Format{Rate: 48000, Bits: 24}
+	p := &Player{ringBuffer: NewRing(4), format: cd, clock: &Clock{}}
+	p.SetSynchronized(false)
+	p.Push(formatPCM(cd, 0, 1, 1, 1, 2, 2))
+	p.Push(formatPCM(hi, 0, 2, 3, 3, 4, 4))
+	out := make([]int32, 8)
+	p.Fill(out, 0, 0)
+	if want := []int32{1, 1, 2, 2, 0, 0, 0, 0}; !reflect.DeepEqual(out, want) {
+		t.Fatalf("first block %v, want the 44.1 kHz frame then silence", out)
+	}
+	if f := p.Format(); f != hi {
+		t.Fatalf("format %v after a 48 kHz frame, want %v", f, hi)
+	}
+	if p.clock.rate != 48000 {
+		t.Fatalf("clock counts at %d Hz", p.clock.rate)
+	}
+	p.Fill(out, 0, 0)
+	if want := []int32{3, 3, 4, 4, 0, 0, 0, 0}; !reflect.DeepEqual(out, want) {
+		t.Fatalf("second block %v", out)
+	}
+	if f := p.Format(); f != hi {
+		t.Fatalf("format changed again to %v", f)
 	}
 }
 
@@ -126,7 +134,7 @@ func TestAACMutesFirstBlockAndGaps(t *testing.T) {
 }
 
 func TestBufferedFormatSelection(t *testing.T) {
-	d := newBufferedDecoder(formatAAC44100, nil)
+	d := newBufferedDecoder(formatAAC44100)
 	if f := d.formatFor(ssrcAAC48000); f != formatAAC48000 {
 		t.Fatalf("SSRC %#x gave %s", ssrcAAC48000, f.name)
 	}

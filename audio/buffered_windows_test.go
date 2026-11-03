@@ -26,7 +26,7 @@ func TestEncryptedBufferedAACDecode(t *testing.T) {
 		t.Fatal(err)
 	}
 	defer file.Close()
-	decoder := newBufferedDecoder(formatAAC44100, nil)
+	decoder := newBufferedDecoder(formatAAC44100)
 	defer decoder.Close()
 	key := make([]byte, 32)
 	for i := range key {
@@ -74,8 +74,8 @@ func TestEncryptedBufferedAACDecode(t *testing.T) {
 			continue
 		}
 		// Decoded audio keeps the timestamp of the packet it came from.
-		if len(frame.Data()) != 4096 || frame.Timestamp != uint32(decoded*1024) {
-			t.Fatalf("packet %d: invalid decoded frame (%d bytes, timestamp %d, want %d)",
+		if len(frame.Data()) != 2048 || frame.Timestamp != uint32(decoded*1024) {
+			t.Fatalf("packet %d: invalid decoded frame (%d samples, timestamp %d, want %d)",
 				sequence, len(frame.Data()), frame.Timestamp, decoded*1024)
 		}
 		for _, b := range frame.Data() {
@@ -176,7 +176,7 @@ func TestNextStreamGetsANewDecoder(t *testing.T) {
 	deadline := time.Now().Add(2 * time.Second)
 	for time.Now().Before(deadline) {
 		if frame, err := player.ringBuffer.TryPop(); err == nil {
-			if len(frame.(*PCMFrame).Data()) != 4096 {
+			if len(frame.(*PCMFrame).Data()) != 2048 {
 				t.Fatal("invalid second decoded frame")
 			}
 			return
