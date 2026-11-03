@@ -160,6 +160,73 @@ func TestRealtimeUDPReordersAuthenticatedPackets(t *testing.T) {
 	}
 }
 
+// macOS sends each packet three times (redundantAudio). Only the first copy
+// is decoded and counted; the others are dropped before decoding.
+func TestRealtimeUDPDropsRedundantCopies(t *testing.T) {
+	player := NewPlayer(ptp.NewVirtualClock(0), NewRing(10))
+	server, _ := NewServer(player)
+	key := make([]byte, 32)
+	port, _, err := server.SetupRealtime(key, 352, CDRealtime)
+	if err != nil {
+		t.Fatal(err)
+	}
+	defer server.Teardown()
+	packet, err := testALACPacket(key)
+	if err != nil {
+		t.Fatal(err)
+	}
+	conn, err := net.Dial("udp4", net.JoinHostPort("127.0.0.1", strconv.Itoa(port)))
+	if err != nil {
+		t.Fatal(err)
+	}
+	defer conn.Close()
+	for _, seq := range []uint16{9, 9, 9, 10, 10, 11, 10, 11, 11} {
+		binary.BigEndian.PutUint16(packet[2:4], seq)
+		if _, err := conn.Write(packet); err != nil {
+			t.Fatal(err)
+		}
+	}
+	var got []uint32
+	deadline := time.Now().Add(2 * time.Second)
+	for len(got) < 3 && time.Now().Before(deadline) {
+		if value, err := player.ringBuffer.TryPop(); err == nil {
+			got = append(got, value.(*PCMFrame).SequenceNumber)
+		} else {
+			time.Sleep(time.Millisecond)
+		}
+	}
+	if len(got) != 3 || got[0] != 9 || got[1] != 10 || got[2] != 11 {
+		t.Fatalf("unexpected packets: %v", got)
+	}
+	time.Sleep(50 * time.Millisecond)
+	if _, err := player.ringBuffer.TryPop(); err == nil {
+		t.Fatal("a redundant copy was played")
+	}
+	if bytes := player.audioBytes.Load(); bytes != 3*uint64(len(packet)-36) {
+		t.Fatalf("audio bytes = %d, want 3 packets' worth (%d)", bytes, 3*(len(packet)-36))
+	}
+}
+
+func TestSeenWindow(t *testing.T) {
+	var w seenWindow
+	if w.has(0) {
+		t.Fatal("empty window has sequence 0")
+	}
+	w.add(65535)
+	w.add(5)
+	if !w.has(65535) || !w.has(5) || w.has(5+1024) || w.has(6) {
+		t.Fatal("window membership wrong")
+	}
+	w.add(5 + 1024) // replaces 5 in the same slot
+	if w.has(5) || !w.has(5+1024) {
+		t.Fatal("old sequence not replaced")
+	}
+	w.reset()
+	if w.has(65535) {
+		t.Fatal("reset kept a sequence")
+	}
+}
+
 func TestRealtimeUDPRequestsAndAcceptsResentPacket(t *testing.T) {
 	player := NewPlayer(ptp.NewVirtualClock(0), NewRing(10))
 	server, _ := NewServer(player)

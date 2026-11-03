@@ -172,6 +172,9 @@ func (s *Server) receiveRealtime(conn *net.UDPConn, decodePacket func([]byte) (*
 	lastStats := time.Now()
 	// Diagnostics for a stream that plays nothing.
 	var flushDropped, empty uint64
+	// Copies of packets already decoded: redundant audio and late resends.
+	var seen seenWindow
+	var duplicates uint64
 	noAudioCheck := time.After(5 * time.Second)
 	decodedTotal := uint64(0)
 	var standby standbyWatch
@@ -207,6 +210,7 @@ func (s *Server) receiveRealtime(conn *net.UDPConn, decodePacket func([]byte) (*
 		if current := s.flushEpoch.Load(); current != epoch {
 			epoch = current
 			reorder.reset()
+			seen.reset()
 		}
 		var expired <-chan time.Time
 		if at, ok := reorder.deadline(); ok {
@@ -239,6 +243,11 @@ func (s *Server) receiveRealtime(conn *net.UDPConn, decodePacket func([]byte) (*
 			flushDropped++
 			continue
 		}
+		seq, hasSeq := rtpSequence(datagram.data)
+		if hasSeq && seen.has(seq) {
+			duplicates++
+			continue
+		}
 		frame, err := decodePacket(datagram.data)
 		if err != nil {
 			if !reported {
@@ -246,6 +255,11 @@ func (s *Server) receiveRealtime(conn *net.UDPConn, decodePacket func([]byte) (*
 				reported = true
 			}
 			continue
+		}
+		// Only a packet that decrypted is remembered, so a corrupt copy
+		// cannot shut out the genuine one.
+		if hasSeq {
+			seen.add(seq)
 		}
 		if frame == nil {
 			empty++
@@ -287,17 +301,34 @@ func (s *Server) receiveRealtime(conn *net.UDPConn, decodePacket func([]byte) (*
 			log.Printf("AUDIO realtime arrival lead min=%d ms max=%d ms (time before scheduled playback)", minLead.Milliseconds(), maxLead.Milliseconds())
 			haveLead, lastLeadReport = false, time.Now()
 		}
-		if time.Since(lastReport) >= 10*time.Second && (reorder.missing != 0 || reorder.late != 0 || full != 0 || reorder.requests != 0) {
-			log.Printf("AUDIO realtime packets missing=%d late-or-duplicate=%d resend-requested=%d resend-recovered=%d resend-unsent=%d output-queue-full=%d received=%d decoded-samples=%d period=%s queue=%d/%d", reorder.missing, reorder.late, reorder.requests, reorder.recovered, unsent, full, received, samples, time.Since(lastReport).Round(time.Millisecond), s.player.ringBuffer.Length(), s.player.ringBuffer.Capacity())
+		if time.Since(lastReport) >= 10*time.Second && (reorder.missing != 0 || reorder.late != 0 || duplicates != 0 || full != 0 || reorder.requests != 0) {
+			log.Printf("AUDIO realtime packets missing=%d late=%d duplicate=%d resend-requested=%d resend-recovered=%d resend-unsent=%d output-queue-full=%d received=%d decoded-samples=%d period=%s queue=%d/%d", reorder.missing, reorder.late, duplicates, reorder.requests, reorder.recovered, unsent, full, received, samples, time.Since(lastReport).Round(time.Millisecond), s.player.ringBuffer.Length(), s.player.ringBuffer.Capacity())
 			s.player.AddNetwork(received-prev.received, reorder.missing-prev.missing, reorder.late-prev.late,
 				reorder.requests-prev.requests, reorder.recovered-prev.recovered, full-prev.full)
 			reorder.missing, reorder.late, full = 0, 0, 0
 			reorder.requests, reorder.recovered, unsent = 0, 0, 0
-			received, samples = 0, 0
+			received, samples, duplicates = 0, 0, 0
 			prev, lastStats = netSnapshot{}, time.Now()
 			lastReport = time.Now()
 		}
 	}
+}
+
+// seenWindow remembers which of the last 1024 RTP sequence numbers were
+// decoded. macOS sends each realtime packet up to three times (redundantAudio
+// in SETUP); the copies are dropped before they are decrypted and decoded.
+type seenWindow [1024]uint32
+
+func (w *seenWindow) has(seq uint16) bool { return w[seq%1024] == uint32(seq)|1<<16 }
+func (w *seenWindow) add(seq uint16)      { w[seq%1024] = uint32(seq) | 1<<16 }
+func (w *seenWindow) reset()              { *w = seenWindow{} }
+
+// rtpSequence reads the sequence number from an RTP header.
+func rtpSequence(packet []byte) (uint16, bool) {
+	if len(packet) < 12 {
+		return 0, false
+	}
+	return binary.BigEndian.Uint16(packet[2:4]), true
 }
 
 // Control channel rules from shairport-sync (rtp_ap2_control_receiver):
