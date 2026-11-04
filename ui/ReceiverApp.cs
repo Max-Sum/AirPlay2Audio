@@ -334,6 +334,8 @@ internal sealed class Settings
     public bool Statistics = false;
     public string Language = L.Auto;
     public string Dither = "auto"; // auto, on or off
+    public int VolumeMinDb = -30; // dB at the sender's lowest volume step
+    public string VolumeTaper = "standard"; // standard, flat or dasl
     public string RealtimeAnchor = "shairport"; // shairport or low-latency
     public bool DriftCorrection = true;
     public double DriftToleranceMs = 2;
@@ -415,6 +417,8 @@ internal sealed class Settings
             case "Statistics": if (Boolean.TryParse(value, out b)) Statistics = b; break;
             case "Language": if (value == L.Chinese || value == L.English) Language = value; break;
             case "Dither": if (value == "auto" || value == "on" || value == "off") Dither = value; break;
+            case "VolumeMinDb": if (Int32.TryParse(value, out n)) VolumeMinDb = Math.Max(-96, Math.Min(-10, n)); break;
+            case "VolumeTaper": if (value == "standard" || value == "flat" || value == "dasl") VolumeTaper = value; break;
             case "RealtimeAnchor": if (value == "shairport" || value == "low-latency") RealtimeAnchor = value; break;
             case "DriftCorrection": if (Boolean.TryParse(value, out b)) DriftCorrection = b; break;
             case "DriftToleranceMs": if (Double.TryParse(value, NumberStyles.Float, CultureInfo.InvariantCulture, out d) && d > 0 && d <= 1000) DriftToleranceMs = d; break;
@@ -477,6 +481,8 @@ internal sealed class Settings
                 "Statistics=" + Statistics,
                 "Language=" + Language,
                 "Dither=" + Dither,
+                "VolumeMinDb=" + VolumeMinDb.ToString(CultureInfo.InvariantCulture),
+                "VolumeTaper=" + VolumeTaper,
                 "RealtimeAnchor=" + RealtimeAnchor,
                 "DriftCorrection=" + DriftCorrection,
                 "DriftToleranceMs=" + DriftToleranceMs.ToString("R", CultureInfo.InvariantCulture),
@@ -612,6 +618,8 @@ internal sealed class Engine
         if (s.OutputBits != 0) args.Append(" -output-bits ").Append(s.OutputBits.ToString(CultureInfo.InvariantCulture));
         if (s.Statistics) args.Append(" -statistics");
         if (s.Dither != "auto") args.Append(" -dither ").Append(s.Dither);
+        if (s.VolumeMinDb != -30) args.Append(" -volume-min ").Append(s.VolumeMinDb.ToString(CultureInfo.InvariantCulture));
+        if (s.VolumeTaper != "standard") args.Append(" -volume-taper ").Append(s.VolumeTaper);
         if (s.RealtimeAnchor != "shairport") args.Append(" -realtime-anchor ").Append(s.RealtimeAnchor);
         if (s.OutputLatencyMs != 0) args.Append(" -output-latency ").Append(s.OutputLatencyMs.ToString(CultureInfo.InvariantCulture));
         if (!s.DriftCorrection) args.Append(" -drift-correction=false");
@@ -1616,6 +1624,8 @@ internal sealed class AdvancedForm : Form
     private readonly ComboBox device = new ComboBox();
     private readonly ComboBox format = new ComboBox();
     private readonly ComboBox dither = new ComboBox();
+    private readonly NumericUpDown volumeMin = new NumericUpDown();
+    private readonly ComboBox taper = new ComboBox();
     private readonly NumericUpDown delay = new NumericUpDown();
     private readonly CheckBox synchronize = new CheckBox();
     private readonly ComboBox anchor = new ComboBox();
@@ -1706,6 +1716,16 @@ internal sealed class AdvancedForm : Form
         Choose(dither, s.Dither, new NetworkChoice { Name = "auto", Label = L.T("自动（16 位且调过音量、重采样或音源为 24 位时）", "Auto (16-bit with volume change, resampling or 24-bit audio)") },
             new NetworkChoice { Name = "on", Label = L.T("始终加入", "Always") }, new NetworkChoice { Name = "off", Label = L.T("关闭", "Off") });
         Row(g, L.T("抖动", "Dither"), dither, null);
+
+        g = Section(left, L.T("发送端音量", "Sender volume"));
+        Number(volumeMin, -96, -10, s.VolumeMinDb, 0, 1);
+        Row(g, L.T("最低音量", "Minimum volume"), volumeMin, "dB");
+        Row(g, null, Note(L.T("发送端音量调到最低一格时的音量；数值越小越轻", "Volume at the sender's lowest step; lower is quieter")), null);
+        taper.DropDownStyle = ComboBoxStyle.DropDownList; taper.Dock = DockStyle.Fill;
+        Choose(taper, s.VolumeTaper, new NetworkChoice { Name = "standard", Label = L.T("标准", "Standard") },
+            new NetworkChoice { Name = "flat", Label = L.T("线性", "Flat") },
+            new NetworkChoice { Name = "dasl", Label = L.T("响度", "Loudness") });
+        Row(g, L.T("音量曲线", "Volume taper"), taper, null);
 
         g = Section(left, L.T("故障排查", "Troubleshooting"));
         Row(g, null, Check(trace, L.T("记录详细的协议日志", "Log detailed protocol messages"), s.TraceLog), null);
@@ -1997,6 +2017,8 @@ internal sealed class AdvancedForm : Form
         n.OutputRate = outputFormat.Rate;
         n.OutputBits = outputFormat.Bits;
         n.Dither = Chosen(dither, settings.Dither);
+        n.VolumeMinDb = (int)volumeMin.Value;
+        n.VolumeTaper = Chosen(taper, settings.VolumeTaper);
         n.TraceLog = trace.Checked;
         n.Statistics = statistics.Checked;
         n.DriftCorrection = driftCorrection.Checked;
@@ -2020,6 +2042,7 @@ internal sealed class AdvancedForm : Form
             || n.OutputLatencyMs != settings.OutputLatencyMs
             || n.OutputDevice != settings.OutputDevice || n.OutputRate != settings.OutputRate || n.OutputBits != settings.OutputBits
             || n.Dither != settings.Dither
+            || n.VolumeMinDb != settings.VolumeMinDb || n.VolumeTaper != settings.VolumeTaper
             || n.TraceLog != settings.TraceLog || n.Statistics != settings.Statistics
             || n.DriftCorrection != settings.DriftCorrection || n.DriftToleranceMs != settings.DriftToleranceMs
             || n.ResyncThresholdMs != settings.ResyncThresholdMs
@@ -2041,6 +2064,8 @@ internal sealed class AdvancedForm : Form
         settings.OutputRate = n.OutputRate;
         settings.OutputBits = n.OutputBits;
         settings.Dither = n.Dither;
+        settings.VolumeMinDb = n.VolumeMinDb;
+        settings.VolumeTaper = n.VolumeTaper;
         settings.TraceLog = n.TraceLog;
         settings.Statistics = n.Statistics;
         settings.DriftCorrection = n.DriftCorrection;

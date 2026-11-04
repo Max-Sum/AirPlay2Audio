@@ -79,7 +79,8 @@ AirPlay2Engine.exe -n "客厅" -output-device 2 -statistics
 | `-output-bits` | `0` | 输出位深，16、24 或 32；`0` 跟随音源 |
 | `-output-rate` | `0` | 输出采样率，44100、48000、88200、96000、176400 或 192000；`0` 跟随音源 |
 | `-dither` | `auto` | 抖动，`auto`、`on` 或 `off` |
-| `-volume-range` | `60` | 发送端最低音量对应的衰减，单位 dB。对应 shairport-sync 的 `volume_range_db` |
+| `-volume-min` | `-30` | 发送端音量最低一格对应的音量，单位 dB，范围 -96 到 -10。即 shairport-sync 的 `volume_range_db` 取负。旧参数 `-volume-range 60` 仍可用，等于 `-volume-min -60` |
+| `-volume-taper` | `standard` | 从最大音量到 `-volume-min` 的音量曲线：`standard`（shairport-sync 曲线，高音量段较平缓）、`flat`（每格 dB 相同）或 `dasl`（滑块每减半音量降 10 dB；最低几格停在最低音量） |
 
 ### 网络
 
