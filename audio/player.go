@@ -72,8 +72,10 @@ type Player struct {
 	// Active state, as shairport-sync's sessioncontrol: the device is kept
 	// open for activeTimeout after playback stops, then released.
 	activeTimeout time.Duration
-	// volumeRange is the attenuation in dB at the lowest sender volume.
-	volumeRange float64
+	// volumeMin is the attenuation in dB at the lowest sender volume, and
+	// volumeTaper the curve towards it.
+	volumeMin   float64
+	volumeTaper VolumeTaper
 	// realtimeAnchor selects how realtime anchors are interpreted.
 	realtimeAnchor RealtimeAnchor
 	// OnEvent, when set, is called (from the player goroutine) with
@@ -140,7 +142,7 @@ func (p *Player) frames(d time.Duration) int { return int(int64(d) * p.rate() / 
 func NewPlayer(clock *ptp.VirtualClock, ring *Ring) *Player {
 	return &Player{clock: &Clock{virtualClock: clock, rate: int64(codec.DefaultFormat.Rate)}, format: codec.DefaultFormat,
 		ControlChannel: make(chan globals.ControlMessage, 100), stream: codec.NewStream(), ringBuffer: ring, baseCapacity: ring.Capacity(),
-		synchronized: true, sync: DefaultSyncOptions, volumeRange: DefaultVolumeRange}
+		synchronized: true, sync: DefaultSyncOptions, volumeMin: DefaultVolumeMin}
 }
 
 // Format reports the format of the audio the next Fill produces. When the
@@ -615,7 +617,7 @@ func (p *Player) Run() {
 		case globals.UNANCHOR:
 			p.clearAnchor()
 		case globals.VOLUME:
-			if err := p.stream.SetVolume(VolumeToAttenuation(msg.Paramf, p.volumeRange)); err != nil {
+			if err := p.stream.SetVolume(VolumeToAttenuation(msg.Paramf, p.volumeMin, p.volumeTaper)); err != nil {
 				globals.ErrLog.Printf("set volume: %v", err)
 			}
 		case globals.LOCAL_VOLUME:

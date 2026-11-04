@@ -137,7 +137,10 @@ type options struct {
 	sessionTimeout     int
 	activeTimeout      int
 	refuseInterruption bool
+	volumeMin          float64
 	volumeRange        float64
+	volumeTaper        string
+	taper              audio.VolumeTaper
 	realtimeAnchor     string
 	anchorMode         audio.RealtimeAnchor
 	hooks              map[string]*string
@@ -173,7 +176,9 @@ func parseFlags() (*options, error) {
 	flag.StringVar(&codec.Output.Dither, "dither", "auto", "dither: auto (16-bit output with volume or rate conversion, or of 24-bit audio), on or off")
 	flag.StringVar(&codec.Output.API, "output-api", "wasapi", "Windows output: wasapi (lower delay; falls back to waveout if it cannot open) or waveout")
 	flag.IntVar(&codec.Output.BufferMs, "output-buffer", codec.DefaultBufferMs, "milliseconds of audio WASAPI keeps queued at the device; lower is less delay, too low can crackle on a busy computer")
-	flag.Float64Var(&o.volumeRange, "volume-range", audio.DefaultVolumeRange, "attenuation in dB at the sender's lowest volume step (shairport-sync's volume_range_db)")
+	flag.Float64Var(&o.volumeMin, "volume-min", audio.DefaultVolumeMin, "volume in dB at the sender's lowest step, from -96 to -10 (shairport-sync's volume_range_db, negated)")
+	flag.Float64Var(&o.volumeRange, "volume-range", 0, "deprecated: same as -volume-min with the sign removed")
+	flag.StringVar(&o.volumeTaper, "volume-taper", "standard", "volume curve from full to -volume-min: standard (shairport-sync), flat (equal dB per step) or dasl (-10 dB each time the slider halves)")
 
 	// Synchronization.
 	flag.StringVar(&o.realtimeAnchor, "realtime-anchor", "shairport", "AirPlay 2 realtime stream timing: shairport (in step with other AirPlay receivers, as shairport-sync) or low-latency (about 1.75 s earlier; suits video on the sender, not multi-room)")
@@ -222,8 +227,14 @@ func parseFlags() (*options, error) {
 	if o.anchorMode, err = audio.ParseRealtimeAnchor(o.realtimeAnchor); err != nil {
 		return nil, err
 	}
-	if o.volumeRange < 10 || o.volumeRange > 96 {
-		return nil, fmt.Errorf("-volume-range must be between 10 and 96 dB")
+	if o.volumeRange != 0 {
+		o.volumeMin = -o.volumeRange
+	}
+	if o.volumeMin < -96 || o.volumeMin > -10 {
+		return nil, fmt.Errorf("-volume-min must be between -96 and -10 dB")
+	}
+	if o.taper, err = audio.ParseVolumeTaper(o.volumeTaper); err != nil {
+		return nil, err
 	}
 	if o.sessionTimeout < 0 || o.activeTimeout < 0 {
 		return nil, fmt.Errorf("timeouts cannot be negative")
@@ -308,7 +319,7 @@ func run() error {
 		Resync:          time.Duration(o.resyncThreshold * float64(time.Millisecond)),
 	})
 	player.SetActiveTimeout(time.Duration(o.activeTimeout) * time.Second)
-	player.SetVolumeRange(o.volumeRange)
+	player.SetVolumeCurve(o.volumeMin, o.taper)
 	player.SetRealtimeAnchor(o.anchorMode)
 	player.OnEvent = func(event string) { runHook(*o.hooks[event], event) }
 	if err := player.Init(); err != nil {

@@ -81,7 +81,8 @@ These are the command-line options of `AirPlay2Engine.exe`. The window's advance
 | `-output-bits` | `0` | Output sample size, 16, 24 or 32; `0` follows the stream |
 | `-output-rate` | `0` | Output sample rate, 44100, 48000, 88200, 96000, 176400 or 192000; `0` follows the stream |
 | `-dither` | `auto` | Dither, `auto`, `on` or `off` |
-| `-volume-range` | `60` | Attenuation in dB at the sender's lowest volume step. Same as shairport-sync's `volume_range_db` |
+| `-volume-min` | `-30` | Volume in dB at the sender's lowest step, from -96 to -10. Same as shairport-sync's `volume_range_db`, negated. The older `-volume-range 60` still works and means `-volume-min -60` |
+| `-volume-taper` | `standard` | Volume curve from full volume down to `-volume-min`: `standard` (shairport-sync's curve, gentle near the top), `flat` (same dB per step) or `dasl` (10 dB quieter each time the slider halves; the bottom steps stay at the minimum) |
 
 ### Network
 
